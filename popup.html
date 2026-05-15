@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CK Review Buddy</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- SCREEN: HOME -->
+  <div id="screen-home" class="screen active">
+    <div class="header">
+      <div class="logo">🩺</div>
+      <h1>CK Review Buddy</h1>
+      <p class="tagline">Turn wrong answers into wins</p>
+    </div>
+
+    <div id="status-box" class="status-box hidden"></div>
+
+    <div class="btn-group">
+      <div id="scan-position" style="font-size:12px;color:#94a3b8;margin-bottom:8px;min-height:16px;"></div>
+      <button id="btnScrape" class="btn btn-primary" title="Scrape the questions visible on your active Q-bank tab (UWorld, AMBOSS, NBME, or CCS Cases) and generate review questions from the ones you got wrong.">
+        <span class="btn-icon">🔍</span> Generate 25 Questions
+      </button>
+      <div id="scrape-position" style="font-size:12px;color:#94a3b8;text-align:center;margin:-8px 0 4px;min-height:16px;"></div>
+      <button id="btnCollect" class="btn btn-success hidden">
+        <span class="btn-icon">📥</span> 2. Collect &amp; Analyze
+      </button>
+      <button id="btnStartQuiz" class="btn btn-success hidden" title="Begin the spaced-repetition quiz on your scraped missed concepts. Claude will generate explanations and follow-ups.">
+        <span class="btn-icon">🎮</span> Start Quiz
+      </button>
+      <button id="btnResumeQuiz" class="btn btn-success hidden" style="background:linear-gradient(135deg,#059669,#10b981);" title="Continue an in-progress quiz from exactly where you left off. Works across extension reloads and page refreshes.">
+        <span class="btn-icon">▶</span> <span id="btnResumeLabel">Resume Quiz</span>
+      </button>
+      <button id="btnNavTest" class="btn btn-ghost" title="Open the question map / grid to navigate directly to any scraped question.">
+        <span class="btn-icon">🗺</span> Navigation Test
+      </button>
+      <button id="btnClear" class="btn btn-ghost" title="Wipe all scraped questions and quiz state from this browser. Cannot be undone.">
+        <span class="btn-icon">🗑</span> Clear Data
+      </button>
+      <div id="test-scan-wrap" style="display:flex;gap:6px;">
+        <button id="btnSetStart" class="btn btn-ghost" style="flex:1;">
+          <span class="btn-icon">📍</span> Set Start Q
+        </button>
+        <button id="btnScrape1" class="btn btn-ghost" style="flex:1;">
+          <span class="btn-icon">🔬</span> Scan 1
+        </button>
+        <button id="btnScrape5" class="btn btn-ghost" style="flex:1;">
+          <span class="btn-icon">🔬</span> Scan 5
+        </button>
+      </div>
+      <div id="test-scan-status" style="font-size:11px;color:#94a3b8;text-align:center;margin-top:4px;min-height:14px;"></div>
+
+  <!-- SET START Q MODAL -->
+  <div id="set-start-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:16px;padding:20px;width:360px;max-width:90vw;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h3 style="margin:0;color:#f8fafc;font-size:15px;">📍 Set Start Question</h3>
+        <button id="btnSetStartClose" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="set-start-section-btn" data-s="1" style="padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #6366f1;background:#6366f1;color:#fff;">S1</button>
+        <button class="set-start-section-btn" data-s="2" style="padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S2</button>
+        <button class="set-start-section-btn" data-s="3" style="padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S3</button>
+        <button class="set-start-section-btn" data-s="4" style="padding:5px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S4</button>
+      </div>
+      <div id="set-start-grid" style="display:grid;grid-template-columns:repeat(10,1fr);gap:5px;margin-bottom:12px;"></div>
+      <div id="set-start-status" style="font-size:12px;color:#94a3b8;text-align:center;min-height:16px;"></div>
+    </div>
+  </div>
+      <button id="btnDebug" class="btn btn-ghost">
+        <span class="btn-icon">🔬</span> Debug This Page
+      </button>
+      <button id="btnAmbossQbank" class="btn btn-primary" style="background:linear-gradient(135deg,#7c3aed,#8b5cf6);border-color:#8b5cf6;">
+        <span class="btn-icon">📚</span> <span id="btnAmbossQbankLabel">AMBOSS Qbank — Scrape &amp; Quiz</span>
+      </button>
+      <div id="amboss-qbank-position" style="font-size:12px;color:#a78bfa;text-align:center;margin:-8px 0 4px;min-height:16px;"></div>
+      <div style="display:flex;gap:6px;">
+        <button id="btnAmbossScan1" class="btn btn-ghost" style="flex:1;border-color:#8b5cf6;color:#a78bfa;">
+          <span class="btn-icon">🔬</span> AMBOSS Scan 1
+        </button>
+        <button id="btnAmbossScan5" class="btn btn-ghost" style="flex:1;border-color:#8b5cf6;color:#a78bfa;">
+          <span class="btn-icon">🔬</span> AMBOSS Scan 5
+        </button>
+      </div>
+      <div id="amboss-scan-status" style="font-size:11px;color:#94a3b8;text-align:center;margin-top:4px;min-height:14px;"></div>
+      <button id="btnAmboss" class="btn btn-ghost" style="border-color:#8b5cf6;color:#a78bfa;">
+        <span class="btn-icon">📚</span> AMBOSS Ethics / QI
+      </button>
+      <!-- UWorld Qbank -->
+      <button id="btnUworldQbank" class="btn btn-primary" style="background:linear-gradient(135deg,#f97316,#fb923c);border-color:#f97316;">
+        <span class="btn-icon">📘</span> <span id="btnUworldQbankLabel">UWorld Qbank — Scrape &amp; Quiz</span>
+      </button>
+      <div id="uworld-qbank-position" style="font-size:12px;color:#fb923c;text-align:center;margin:-8px 0 4px;min-height:16px;"></div>
+      <div style="display:flex;gap:6px;">
+        <button id="btnUworldScan1" class="btn btn-ghost" style="flex:1;border-color:#f97316;color:#fb923c;">
+          <span class="btn-icon">🔬</span> UWorld Scan 1
+        </button>
+        <button id="btnUworldScan5" class="btn btn-ghost" style="flex:1;border-color:#f97316;color:#fb923c;">
+          <span class="btn-icon">🔬</span> UWorld Scan 5
+        </button>
+      </div>
+      <div id="uworld-scan-status" style="font-size:11px;color:#94a3b8;text-align:center;margin-top:4px;min-height:14px;"></div>
+
+      <button id="btnStrategyCards" class="btn btn-ghost" style="border-color:#f59e0b;color:#fbbf24;">
+        <span class="btn-icon">🃏</span> Strategy Cards
+      </button>
+
+      <button id="btnToggleExtension" class="btn btn-ghost" style="border-color:#ef4444;color:#f87171;">
+        <span class="btn-icon">⏸</span> Disable During NBME Exams
+      </button>
+    </div>
+
+    <div id="scrape-preview" class="preview-box hidden">
+      <div class="preview-row">
+        <span class="badge badge-red" id="count-wrong">0 ✗</span>
+        <span class="badge badge-green" id="count-right">0 ✓</span>
+        <span class="badge badge-gray" id="count-unknown">0 ?</span>
+      </div>
+      <p class="preview-hint">Click <strong>Scan</strong> again to re-scrape, or <strong>Start Quiz</strong> if already processed.</p>
+    </div>
+
+    <div class="footer-links">
+      <a id="openSettings" href="#">⚙ API Key</a> &nbsp;·&nbsp; <a id="openQuizSettings" href="#">🎮 Quiz Settings</a>
+      &nbsp;·&nbsp;
+      <a id="openWindow" href="#">⤢ Open in Window</a>
+    </div>
+    <div style="text-align:center;margin-top:8px;font-size:11px;color:#334155;">
+      Created by <a href="https://instagram.com/dam_katz_md" target="_blank" style="color:#6366f1;text-decoration:none;">@dam_katz_md</a> · Dr. Adam Katz
+    </div>
+  </div>
+
+  <!-- SCREEN: PROCESSING -->
+  <div id="screen-processing" class="screen">
+    <div class="processing-wrap">
+      <div class="spinner"></div>
+      <div id="proc-phase" style="font-size:11px;font-weight:800;letter-spacing:0.08em;color:#6366f1;margin-bottom:6px;min-height:14px;"></div>
+      <h2 id="proc-title">Analyzing questions…</h2>
+      <p id="proc-sub">Claude is diagnosing your misconceptions and building your quiz.</p>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar" id="proc-bar"></div>
+      </div>
+      <p id="proc-count" class="proc-count">0 / 0</p>
+      <p class="proc-note">You'll get a notification when it's ready. You can close this popup.</p>
+      <button id="btnContinueChunk" class="btn btn-success hidden" style="margin-top:12px;">
+        <span class="btn-icon">▶</span> Continue next 10
+      </button>
+      <button id="btnAbortScrape" class="btn btn-ghost" style="margin-top:10px;font-size:13px;color:#ef4444;border:1px solid #ef4444;">
+        ■ Abort Scraping
+      </button>
+      <button id="btnAbortGenerating" class="btn btn-ghost" style="margin-top:6px;font-size:13px;color:#f97316;border:1px solid #f97316;">
+        ■ Abort Generating
+      </button>
+      <button id="btnForceHome" class="btn btn-ghost" style="margin-top:8px;font-size:12px;color:#475569;">
+        ↩ Back to Home
+      </button>
+    </div>
+  </div>
+
+  <!-- TIMER BAR - inline -->
+  <div id="timer-bar-wrap" style="display:none;position:sticky;top:0;left:0;right:0;height:5px;z-index:100;background:#1e293b;margin:0 -20px;">
+    <div id="timer-bar" style="height:100%;background:#10b981;width:100%;transition:width .5s linear;"></div>
+  </div>
+  <div id="timer-label" style="display:none;font-family:system-ui,sans-serif;font-size:11px;font-weight:700;color:#94a3b8;text-align:right;margin-bottom:4px;"></div>
+
+  <!-- SCREEN: QUIZ -->
+  <div id="screen-quiz" class="screen">
+    <div class="quiz-header">
+      <div class="quiz-meta">
+        <span id="quiz-label" class="quiz-label incorrect-label">MISSED</span>
+        <span id="quiz-qnum" class="quiz-qnum">Q1 · 1/5</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="session-clock" style="display:none;font-size:11px;color:#475569;font-weight:600;font-family:monospace;"></span>
+        <button id="btnQuizSettings" style="background:#1e293b;border:1px solid #475569;color:#94a3b8;font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;">⚙</button>
+        <div class="score-wrap">
+          <span class="score-icon">⚡</span>
+          <span id="score-display">0</span>
+          <span class="streak-display" id="streak-display"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="misconception-box" class="misconception-box hidden">
+      <div class="misconception-label">📋 Answer Review</div>
+      <div id="misconception-text"></div>
+    </div>
+
+    <div id="vignette-quote-box" class="vignette-quote-box hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div class="vignette-quote-label">📌 Key clue from the vignette</div>
+        <button id="btnReplayAudio" title="Replay audio" style="background:none;border:1px solid #6366f1;color:#818cf8;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;cursor:pointer;">🔊 Replay</button>
+      </div>
+      <div id="vignette-quote-text" class="vignette-quote-text"></div>
+    </div>
+
+    <div class="quiz-question" id="quiz-question-text"></div>
+
+    <div class="choices" id="choices-wrap"></div>
+
+    <div id="feedback-box" class="feedback-box hidden">
+      <div id="feedback-icon" class="feedback-icon"></div>
+      <div id="feedback-text" class="feedback-text"></div>
+      <div id="explanation-tts-wrap" style="display:flex;gap:6px;margin-top:10px;margin-bottom:4px;">
+        <button id="btnReadExplanation" title="Read the scraped explanation out loud. If your Q-bank tab (UWorld / AMBOSS / NBME / CCS Cases) is open, each word will be highlighted on the actual page as it's spoken." style="flex:1;padding:8px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;">🔊 Read NBME Explanation</button>
+        <button id="btnReplayExplanation" title="Replay the explanation from the start." style="padding:8px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#94a3b8;font-size:12px;font-weight:700;cursor:pointer;">🔄</button>
+        <button id="btnStopExplanation" title="Stop the read-aloud and clear any word highlights on the page." style="padding:8px 12px;background:#1e293b;border:1px solid #334155;border-radius:8px;color:#f87171;font-size:12px;font-weight:700;cursor:pointer;">⏹</button>
+      </div>
+      <div id="tts-read-panel" class="hidden" style="margin-top:8px;padding:12px 14px;background:#0f172a;border:1px solid #334155;border-radius:8px;max-height:260px;overflow-y:auto;font-size:13px;line-height:1.55;color:#cbd5e1;"></div>
+      <style>
+        #tts-read-panel .ckrb-word { transition: background-color 120ms ease, color 120ms ease; padding: 0 1px; border-radius: 3px; }
+        #tts-read-panel .ckrb-word.ckrb-active { background: #f97316; color: #0f172a; box-shadow: 0 0 0 2px #f97316; }
+        #tts-read-panel .ckrb-word.ckrb-spoken { color: #64748b; }
+      </style>
+      <button id="btnNextQ" class="btn btn-primary btn-next" title="Submit your answer and advance to the next quiz question.">Next →</button>
+    </div>
+
+    <div id="zczc-panel" class="zczc-panel hidden"></div>
+  </div>
+
+
+  <!-- SCREEN: QUESTION GRID -->
+  <div id="screen-grid" class="screen">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="font-size:16px;margin:0;">Question Map</h2>
+      <button id="btnGridBack" class="btn btn-ghost" style="padding:6px 12px;font-size:13px;">← Back</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:13px;color:#94a3b8;">Total questions in block:</span>
+      <input type="number" id="grid-total-input" min="1" max="200" value="50" style="width:70px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:5px 8px;color:#e2e8f0;font-size:14px;">
+      <button id="btnRefreshGrid" class="btn btn-ghost" style="padding:6px 12px;font-size:13px;">Refresh</button>
+    </div>
+    <div id="grid-status" style="font-size:12px;color:#94a3b8;margin-bottom:10px;min-height:18px;"></div>
+    <div id="question-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;"></div>
+    <div id="grid-regen-wrap" style="display:none;margin-top:14px;">
+      <button id="btnRegenMissing" style="width:100%;padding:10px;background:#ef4444;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">⚡ Generate missing questions</button>
+    </div>
+  </div>
+
+
+  <!-- SCREEN: NAV TEST -->
+  <div id="screen-nav" class="screen">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="font-size:16px;margin:0;">🗺 Navigation</h2>
+      <button id="btnNavBack" class="btn btn-ghost" style="padding:6px 12px;font-size:13px;">← Back</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+      <span style="font-size:12px;color:#94a3b8;">Jump to:</span>
+      <button class="nav-section-btn" data-s="0" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #6366f1;background:#6366f1;color:#fff;">All</button>
+      <button class="nav-section-btn" data-s="1" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S1</button>
+      <button class="nav-section-btn" data-s="2" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S2</button>
+      <button class="nav-section-btn" data-s="3" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S3</button>
+      <button class="nav-section-btn" data-s="4" style="padding:5px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid #334155;background:#1e293b;color:#94a3b8;">S4</button>
+    </div>
+    <div id="nav-sections" style="display:none;"></div>
+    <div id="nav-perSection" style="display:none;" data-val="50"></div>
+    <div id="nav-status" style="font-size:12px;color:#94a3b8;margin-bottom:10px;min-height:16px;"></div>
+    <div id="nav-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;"></div>
+  </div>
+
+  <!-- SCREEN: RESULTS -->
+  <div id="screen-results" class="screen">
+    <div class="results-wrap">
+      <div class="trophy" id="trophy-icon">🏆</div>
+      <h2 id="result-title">Quiz Complete!</h2>
+      <div class="result-score-big" id="result-score-big"></div>
+      <div class="result-breakdown" id="result-breakdown"></div>
+      <div class="result-bar-wrap">
+        <div class="result-bar" id="result-bar"></div>
+      </div>
+      <div class="btn-group">
+        <button id="btnGenNext10" class="btn btn-success hidden" style="margin-bottom:8px;"><span class="btn-icon">▶</span> Generate next 10</button>
+      <button id="btnGenNext25" class="btn btn-success hidden" style="margin-bottom:8px;"><span class="btn-icon">⚡</span> Generate next 25?</button>
+      <button id="btnPlayAgain" class="btn btn-primary">Play Again</button>
+        <button id="btnHomeFromResult" class="btn btn-ghost">Back to Home</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:16px;padding:24px;width:340px;max-width:90vw;">
+      <h3 style="margin:0 0 16px;color:#f8fafc;font-size:16px;">⚙ Quiz Settings</h3>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Auto-navigate NBME tab</div>
+          <div class="setting-desc">Jump to exam question when trivia loads</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-autonav" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Read quote before question</div>
+          <div class="setting-desc">Reads quote in alt voice before question sentence</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-readquote" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Read explanations aloud</div>
+          <div class="setting-desc">Speaks explanation text after answering</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-readexplain"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Read questions aloud</div>
+          <div class="setting-desc">Speaks each quiz question when it loads</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-readaloud"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Highlight → read aloud</div>
+          <div class="setting-desc">Show floating 🔊 button when you select text on Qbank pages</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-highlighttts" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Timer &amp; speed taunts</div>
+          <div class="setting-desc">Countdown per question + motivational audio</div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="set-timer" checked><span class="toggle-slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Target seconds per question</div>
+          <div class="setting-desc">Taunt fires when you exceed this</div>
+        </div>
+        <input type="number" id="set-timelimit" value="45" min="10" max="300" style="width:60px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:13px;">
+      </div>
+      <button id="btnOpenGrid" title="Open the question map — a grid showing every scraped question with right/wrong/not-yet-attempted status. Click a cell to jump to that question." style="width:100%;margin-top:8px;padding:10px;background:#1e293b;color:#94a3b8;border:1px solid #334155;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">📊 Question Map</button>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Scrape settle delay (ms)</div>
+          <div class="setting-desc">Wait after page loads before reading. Increase if questions are skipped. (default: 800)</div>
+        </div>
+        <input type="number" id="set-settle" value="800" min="400" max="5000" step="100" style="width:70px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:13px;">
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Page change timeout (ms)</div>
+          <div class="setting-desc">Max wait for page to change before giving up. (default: 8000)</div>
+        </div>
+        <input type="number" id="set-change" value="8000" min="3000" max="20000" step="500" style="width:70px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:13px;">
+      </div>
+      <button id="set-close" style="width:100%;margin-top:16px;padding:10px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Save & Close</button>
+    </div>
+  </div>
+
+
+
+  <!-- SCREEN: AMBOSS -->
+  <div id="screen-amboss" class="screen">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 style="font-size:16px;margin:0;">📚 AMBOSS Ethics / QI</h2>
+      <button id="btnAmbossBack" class="btn btn-ghost" style="padding:6px 12px;font-size:13px;">← Back</button>
+    </div>
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:12px;margin-bottom:12px;font-size:12px;color:#94a3b8;line-height:1.6;">
+      Open an AMBOSS article (Ethics or QI) while logged in, then click Scrape below. Works on any <strong style="color:#a78bfa;">next.amboss.com</strong> article.
+    </div>
+    <div id="amboss-article-status" style="font-size:12px;color:#6366f1;margin-bottom:10px;min-height:16px;text-align:center;"></div>
+    <div class="btn-group">
+      <button id="btnAmbosScrape" class="btn btn-primary" style="background:#7c3aed;">
+        <span class="btn-icon">🔍</span> Scrape Current Article
+      </button>
+      <button id="btnAmbossStartQuiz" class="btn btn-success hidden">
+        <span class="btn-icon">🎮</span> Start AMBOSS Quiz
+      </button>
+      <button id="btnAmbosClear" class="btn btn-ghost">
+        <span class="btn-icon">🗑</span> Clear AMBOSS Data
+      </button>
+    </div>
+    <div id="amboss-status" style="font-size:12px;color:#94a3b8;text-align:center;margin-top:10px;min-height:16px;"></div>
+    <div id="amboss-progress-wrap" style="display:none;margin-top:10px;">
+      <div class="progress-bar-wrap"><div class="progress-bar" id="amboss-bar" style="background:#7c3aed;"></div></div>
+      <div id="amboss-count" style="font-size:12px;color:#94a3b8;text-align:center;margin-top:4px;"></div>
+    </div>
+  </div>
+
+  <!-- SCREEN: AMBOSS QUIZ -->
+  <div id="screen-amboss-quiz" class="screen">
+    <div class="quiz-header">
+      <div class="quiz-meta">
+        <span class="quiz-label" style="background:rgba(124,58,237,0.2);color:#a78bfa;">AMBOSS</span>
+        <span id="amboss-quiz-qnum" class="quiz-qnum">Q1</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btnAmbossQuizBack" style="background:#1e293b;border:1px solid #475569;color:#94a3b8;font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;">← Exit</button>
+        <div class="score-wrap">
+          <span class="score-icon">⚡</span>
+          <span id="amboss-score-display">0</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="amboss-key-principle" style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.3);border-left:3px solid #7c3aed;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:12px;color:#c4b5fd;display:none;"></div>
+
+    <div class="quiz-question" id="amboss-question-text"></div>
+    <div class="choices" id="amboss-choices-wrap"></div>
+
+    <div id="amboss-feedback-box" class="feedback-box hidden">
+      <div id="amboss-feedback-icon" class="feedback-icon"></div>
+      <div id="amboss-feedback-text" class="feedback-text"></div>
+      <div id="amboss-zczc-panel" class="zczc-panel" style="margin-top:10px;display:none;"></div>
+      <button id="btnAmbossNextQ" class="btn btn-primary btn-next">Next →</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+  <script>
+    /* ── TIMING SETTINGS: load + save, no popup.js changes needed ── */
+    (function() {
+      var TIMING_KEY = 'ckrb_timing';
+      var settleEl = document.getElementById('set-settle');
+      var changeEl = document.getElementById('set-change');
+      if (!settleEl || !changeEl) return;
+      // Load saved values
+      chrome.storage.local.get([TIMING_KEY], function(r) {
+        if (r[TIMING_KEY]) {
+          if (r[TIMING_KEY].settle) settleEl.value = r[TIMING_KEY].settle;
+          if (r[TIMING_KEY].change) changeEl.value = r[TIMING_KEY].change;
+        }
+      });
+      // Piggyback on Save & Close button
+      document.getElementById('set-close').addEventListener('click', function() {
+        var timing = { settle: parseInt(settleEl.value) || 800, change: parseInt(changeEl.value) || 8000 };
+        chrome.storage.local.set({ [TIMING_KEY]: timing });
+      }, true); // capture phase so it runs alongside popup.js listener
+    })();
+  </script>
+</body>
+</html>

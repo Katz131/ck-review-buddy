@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CK Review Buddy — Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 40px;
+      width: 460px;
+    }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; color: #f8fafc; }
+    p.sub { font-size: 13px; color: #94a3b8; margin-bottom: 28px; }
+    label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+    input[type="password"], input[type="text"] {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: #e2e8f0;
+      font-size: 14px;
+      outline: none;
+    }
+    input:focus { border-color: #6366f1; }
+    .row { display: flex; gap: 10px; margin-top: 8px; }
+    button {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-save { background: #6366f1; color: #fff; }
+    .btn-save:hover { background: #4f46e5; }
+    .btn-show { background: #1e293b; border: 1px solid #334155; color: #94a3b8; }
+    .status { margin-top: 14px; font-size: 13px; color: #10b981; min-height: 18px; }
+    .hint { margin-top: 18px; font-size: 12px; color: #475569; background: #0f172a; border-radius: 8px; padding: 12px 14px; line-height: 1.6; }
+    a { color: #6366f1; }
+    .howto { margin-top: 18px; font-size: 12.5px; color: #cbd5e1; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 14px 16px; line-height: 1.65; }
+    .howto h3 { font-size: 14px; color: #f8fafc; margin: 0 0 8px 0; font-weight: 700; }
+    .howto h4 { font-size: 13px; color: #a5b4fc; margin: 12px 0 4px 0; font-weight: 700; }
+    .howto kbd { display: inline-block; background: #1e293b; border: 1px solid #334155; border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, monospace; font-size: 11px; color: #e2e8f0; margin: 0 1px; }
+    .howto .feat { margin: 6px 0 10px 0; }
+    .howto .feat b { color: #f8fafc; }
+    .howto .feat .hint-txt { display: block; color: #94a3b8; font-size: 11.5px; margin-top: 2px; }
+    .howto ul { margin: 4px 0 4px 16px; padding: 0; }
+    .howto li { margin: 2px 0; }
+    details { margin-top: 12px; }
+    details summary { cursor: pointer; color: #a5b4fc; font-weight: 600; outline: none; user-select: none; }
+    details summary::-webkit-details-marker { color: #a5b4fc; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🩺 CK Review Buddy</h1>
+    <p class="sub">Configure your Anthropic API key to enable AI analysis.</p>
+
+    <label for="apikey">Anthropic API Key</label>
+    <input type="password" id="apikey" placeholder="sk-ant-…" autocomplete="off" />
+
+    <div class="row">
+      <button class="btn-save" id="saveBtn">Save Key</button>
+      <button class="btn-show" id="showBtn">Show / Hide</button>
+    </div>
+    <div class="status" id="status"></div>
+
+    <div class="hint">
+      Get your API key from <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>.<br />
+      Your key is stored locally in this browser only and never sent anywhere except Anthropic's API.
+    </div>
+
+    <div style="margin-top:20px;font-size:12px;color:#475569;text-align:center;">
+      Created by <a href="https://instagram.com/dam_katz_md" target="_blank" style="color:#6366f1;text-decoration:none;">@dam_katz_md</a> · Dr. Adam Katz
+    </div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0;" />
+
+    <h2 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">🔊 Azure Speech (precise word-sync TTS)</h2>
+    <p class="sub">Optional. When set, the 🔊 Read feature uses Azure for perfectly synced word highlighting. Without this, it falls back to your browser's local voice (faster to start, but sync drifts).</p>
+
+    <label for="azurekey">Azure Speech Key</label>
+    <input type="password" id="azurekey" placeholder="32-char Azure key…" autocomplete="off" />
+
+    <label for="azureregion" style="margin-top:10px;">Azure Region <span style="color:#475569;">(e.g. eastus, westus2, westeurope)</span></label>
+    <input type="text" id="azureregion" placeholder="eastus" autocomplete="off" />
+
+    <div class="row">
+      <button class="btn-save" id="saveAzureBtn">Save Azure</button>
+      <button class="btn-show" id="showAzureBtn">Show / Hide</button>
+    </div>
+    <div class="status" id="azure-status"></div>
+
+    <div class="hint">
+      Free tier: 500k characters/month. Create a Speech resource at
+      <a href="https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices" target="_blank">portal.azure.com</a>,
+      pick <b>Free F0</b> pricing, then copy <b>Key 1</b> and the <b>Location/Region</b> from the resource's "Keys and Endpoint" page.
+    </div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0;" />
+
+    <h2 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">⏱ Scrape Timing</h2>
+    <p class="sub">Increase settle delay if questions are being skipped.</p>
+
+    <label for="set-settle">Settle delay (ms) — wait after page loads before reading <span style="color:#475569;">(default: 800)</span></label>
+    <input type="number" id="set-settle" value="800" min="400" max="5000" step="100" style="margin-bottom:14px;" />
+
+    <label for="set-change">Page change timeout (ms) — max wait for next question <span style="color:#475569;">(default: 8000)</span></label>
+    <input type="number" id="set-change" value="8000" min="3000" max="20000" step="500" />
+
+    <div class="row" style="margin-top:8px;">
+      <button class="btn-save" id="saveTimingBtn" title="Save your scrape timing settings. Larger values are safer on slow connections.">Save Timing</button>
+    </div>
+    <div class="status" id="timing-status"></div>
+
+    <hr style="border:none;border-top:1px solid #334155;margin:24px 0;" />
+
+    <h2 style="font-size:16px;font-weight:700;color:#f8fafc;margin-bottom:6px;">📖 How to use CK Review Buddy</h2>
+    <p class="sub">A quick reference for features that aren't tied to a visible button. Hover any button in the popup for its tooltip.</p>
+
+    <div class="howto">
+      <h3>Text-to-speech on Q-bank pages</h3>
+
+      <div class="feat">
+        <b>Right-click-drag over text</b> — speaks the selection out loud and lights each word on the page as it's read (orange box on the current word, soft grey trail on words already spoken).
+        <span class="hint-txt">Works on UWorld, AMBOSS, NBME, and CCS Cases review pages. Only active in review mode so it never triggers during real testing.</span>
+      </div>
+
+      <div class="feat">
+        <b>Left-click-drag</b> — normal text selection, exactly what your browser already does. No TTS button pops up, and nothing gets auto-highlighted.
+      </div>
+
+      <div class="feat">
+        <b><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></b> — speak whatever text is currently selected.
+      </div>
+
+      <div class="feat">
+        <b><kbd>Esc</kbd></b> — stop the current read-aloud at any time.
+      </div>
+
+      <h4>Reading the scraped explanation</h4>
+      <div class="feat">
+        In the popup quiz screen, click <b>🔊 Read NBME Explanation</b>. The extension will locate your Q-bank tab (UWorld / AMBOSS / NBME / CCS Cases) and read the explanation aloud directly on that tab, with the same word-by-word highlighting. If no Q-bank tab is open, it falls back to reading in the popup (no page highlight).
+      </div>
+
+      <h3 style="margin-top:14px;">Scraping & quizzing</h3>
+
+      <div class="feat">
+        <b>Scrape current page</b> — pulls the question(s) visible on the active Q-bank tab into CK Buddy. <b>Scrape 1</b> and <b>Scrape 5</b> advance through the Q-bank automatically while scraping.
+        <span class="hint-txt">Tip: the "Set Start" button marks which question number to begin scraping from if you don't want to restart from the first question.</span>
+      </div>
+
+      <div class="feat">
+        <b>Start Quiz</b> — after scraping, this turns your missed concepts into spaced-repetition questions. Claude will generate explanations and follow-ups.
+      </div>
+
+      <div class="feat">
+        <b>Resume Quiz</b> — if you closed the popup mid-quiz, this picks up exactly where you left off. Your progress persists across extension reloads and page refreshes.
+      </div>
+
+      <div class="feat">
+        <b>Next →</b> — advance to the next quiz question. <b>⚙</b> opens per-quiz settings.
+      </div>
+
+      <h3 style="margin-top:14px;">Q-bank helpers</h3>
+
+      <div class="feat">
+        <b>AMBOSS Qbank / UWorld Qbank</b> — purple/orange buttons open a specialized review flow for that platform: it reads the current question set and lets you drill into wrong answers by concept.
+      </div>
+
+      <div class="feat">
+        <b>Question Map (📊)</b> — grid view of every scraped question with status (right / wrong / not attempted). Click a cell to jump.
+      </div>
+
+      <h3 style="margin-top:14px;">Troubleshooting</h3>
+      <details>
+        <summary>Nothing happens when I right-click-drag</summary>
+        <ul>
+          <li>TTS is only active in <b>review mode</b> — make sure the question's explanation is visible (not mid-test).</li>
+          <li>On UWorld, make sure you've submitted the answer and are viewing the explanation panel.</li>
+          <li>Try reloading the page after installing a new extension version.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Grey marker rectangles stuck on the page</summary>
+        <ul>
+          <li>These are the "already-spoken" trail from a TTS pass. They should fade automatically when TTS ends, and get purged when the extension reloads.</li>
+          <li>If any remain, hit <kbd>Esc</kbd> or reload the page to clear them.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>The extension stopped my quiz from resuming</summary>
+        <ul>
+          <li>Your quiz state is saved to two keys (<code>ckrb_active_quiz</code> and <code>ckrb_quiz_progress</code>) and should survive reloads.</li>
+          <li>If Resume is missing, open the popup once — the extension migrates older quiz state on first open.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

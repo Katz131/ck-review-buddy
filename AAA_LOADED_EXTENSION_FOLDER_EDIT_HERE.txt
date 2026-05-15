@@ -1,0 +1,3 @@
+THIS folder (ck-review-buddy\) is the live loaded Brave extension.
+ID: eanjidgieollmmocppapogfkldkegdpi
+Edit manifest.json HERE to bump the version. Read _CLAUDE_README_LOADED_EXTENSION.md for the full story.

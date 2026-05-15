@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "🧠 CK Buddy v124",
+  "version": "2.24",
+  "description": "Scrapes NBME & AMBOSS Q-banks, analyzes wrong answers, quizzes you on missed concepts.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "tabs",
+    "notifications",
+    "windows",
+    "alarms",
+    "management"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://api.anthropic.com/*",
+    "*://*.starttest.com/*",
+    "*://*.nbme.org/*",
+    "*://*.nsas.nbme.org/*",
+    "*://next.amboss.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CK Review Buddy"
+  },
+  "options_page": "settings.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["*://next.amboss.com/*"],
+      "js": ["amboss.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://next.amboss.com/*/review/*", "*://next.amboss.com/*/session/*"],
+      "js": ["amboss_qbank.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px;
+    height: 628px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 40%, #16213e 70%, #0f3460 100%);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    overflow: hidden;
+    position: relative;
+  }
+  .grain {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  }
+  .container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 1;
+  }
+  .left {
+    flex: 1.1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 60px 50px 60px 70px;
+  }
+  .right {
+    flex: 0.9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .quote {
+    font-size: 32px;
+    color: #e8e8e8;
+    line-height: 1.45;
+    font-style: italic;
+    letter-spacing: 0.3px;
+  }
+  .quote em {
+    color: #64b5f6;
+    font-style: italic;
+    font-weight: bold;
+  }
+  .divider {
+    width: 60px;
+    height: 3px;
+    background: linear-gradient(90deg, #64b5f6, transparent);
+    margin: 24px 0;
+  }
+  .tagline {
+    font-size: 16px;
+    color: #8899aa;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  /* Lion silhouette using CSS */
+  .lion-area {
+    width: 350px;
+    height: 350px;
+    position: relative;
+    opacity: 0.15;
+  }
+  .lion-area svg {
+    width: 100%;
+    height: 100%;
+  }
+  /* Circuit lines */
+  .circuit {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 0;
+    opacity: 0.06;
+  }
+  .circuit line {
+    stroke: #64b5f6;
+    stroke-width: 1;
+  }
+  .circuit circle {
+    fill: #64b5f6;
+  }
+</style>
+</head>
+<body>
+  <div class="grain"></div>
+  <svg class="circuit" viewBox="0 0 1200 628">
+    <line x1="800" y1="0" x2="800" y2="628"/>
+    <line x1="900" y1="0" x2="900" y2="628"/>
+    <line x1="1000" y1="0" x2="1000" y2="628"/>
+    <line x1="1100" y1="0" x2="1100" y2="628"/>
+    <line x1="700" y1="100" x2="1200" y2="100"/>
+    <line x1="700" y1="200" x2="1200" y2="200"/>
+    <line x1="700" y1="314" x2="1200" y2="314"/>
+    <line x1="700" y1="428" x2="1200" y2="428"/>
+    <line x1="700" y1="528" x2="1200" y2="528"/>
+    <circle cx="900" cy="200" r="4"/>
+    <circle cx="1000" cy="314" r="4"/>
+    <circle cx="800" cy="428" r="4"/>
+    <circle cx="1100" cy="100" r="4"/>
+    <circle cx="900" cy="528" r="4"/>
+  </svg>
+  <div class="container">
+    <div class="left">
+      <div class="quote">
+        "If your AI demo <em>could</em> have been rehearsed, smart money will <em>assume</em> it was."
+      </div>
+      <div class="divider"></div>
+      <div class="tagline">The wild animal test for AI</div>
+    </div>
+    <div class="right">
+      <div class="lion-area">
+        <svg viewBox="0 0 512 512" fill="#64b5f6">
+          <!-- Stylized lion head silhouette -->
+          <path d="M256 48c-8 0-16 2-24 6-20-16-48-20-72-10-12-24-36-40-64-40-4 0-8 0-12 2 8 16 12 36 8 56-16 12-28 28-36 48-20 8-36 24-44 44 0 4 0 8 0 12 4 28 20 52 44 64-4 16-4 32 0 48 8 28 28 48 52 56 4 20 16 40 32 52 8 16 20 28 36 36l-8 20c-4 12 0 24 8 32l24 24c8 8 16 12 28 12h48c12 0 20-4 28-12l24-24c8-8 12-20 8-32l-8-20c16-8 28-20 36-36 16-12 28-32 32-52 24-8 44-28 52-56 4-16 4-32 0-48 24-12 40-36 44-64 0-4 0-8 0-12-8-20-24-36-44-44-8-20-20-36-36-48-4-20 0-40 8-56-4-2-8-2-12-2-28 0-52 16-64 40-24-10-52-6-72 10-8-4-16-6-24-6z"/>
+          <!-- Eyes -->
+          <circle cx="200" cy="240" r="16" fill="#0a0a0a"/>
+          <circle cx="312" cy="240" r="16" fill="#0a0a0a"/>
+          <circle cx="204" cy="236" r="6" fill="#64b5f6"/>
+          <circle cx="316" cy="236" r="6" fill="#64b5f6"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

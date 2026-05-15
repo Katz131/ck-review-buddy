@@ -1,0 +1,77 @@
+FIX: BRAVE "Failed to load extension" error on CK Buddy
+=========================================================
+
+WHAT HAPPENED
+-------------
+Claude created a file named "_CLAUDE_README_LOADED_EXTENSION.md" at the top
+level of your extension folder (ck-review-buddy\). Chrome and Brave refuse to
+load ANY unpacked extension whose folder contains a filename starting with an
+underscore (_) — those names are reserved by the browser. That is why Brave
+shows the error:
+
+    "Cannot load extension with file or directory name
+     _CLAUDE_README_LOADED_EXTENSION.md. Filenames starting with '_' are
+     reserved for use by the system."
+
+
+FIX (do these steps)
+--------------------
+1. Open File Explorer.
+2. Navigate to:
+       C:\Users\theso\OneDrive\Desktop\ck-review-buddy\
+3. Find the file named:
+       _CLAUDE_README_LOADED_EXTENSION.md
+   (it starts with an underscore)
+4. Right-click it and choose Delete.
+5. Go to Brave and either click "Retry" on the error dialog, or open
+   brave://extensions/ and click the reload (↻) icon on the CK Buddy card.
+6. The extension should now load and show as "CK Buddy v134" version 2.34.
+
+NOTE: the replacement file "CLAUDE_README_LOADED_EXTENSION.md" (no leading
+underscore) is already in place — do NOT delete that one. It contains notes
+future Claude sessions need in order to find the right folder to edit.
+
+
+WHY CLAUDE COULDN'T DO THE DELETE ITSELF
+----------------------------------------
+The file-delete tool (mcp__cowork__allow_cowork_file_delete) was denied at
+the session level earlier in this conversation. Once a tool is denied in a
+Cowork session, there is no in-chat way to re-enable it — the /permissions
+slash command is not available in Cowork mode. Options going forward:
+
+  a) Delete files manually in File Explorer (fastest).
+  b) In Claude desktop app → Settings, look for a Permissions / MCP / Tools
+     panel. If there's a toggle for "allow_cowork_file_delete," turn it on.
+  c) Start a NEW Cowork conversation. In fresh sessions the delete tool is
+     available again and will prompt you for approval the first time it's
+     used.
+
+
+CURRENT STATE OF YOUR EXTENSION (as of this chat)
+-------------------------------------------------
+Loaded folder:  C:\Users\theso\OneDrive\Desktop\ck-review-buddy\
+Extension ID:   eanjidgieollmmocppapogfkldkegdpi
+Browser:        Brave
+Version after fixes: CK Buddy v134 / 2.34
+
+Fixes already applied to the LOADED folder (content.js, popup.js,
+uworld_qbank.js, manifest.json):
+
+  • Highlight-to-TTS now works inside UWorld Step 3's nested iframes
+    (Read button is rendered in the top window; selection coordinates
+    are translated from inner-frame to top-window space).
+  • "Read Explanation" button will ONLY speak the native explanation
+    scraped from the qbank page. If the native one is missing, it now
+    shows "⚠ No native explanation" instead of speaking an
+    AI-generated fallback.
+  • NBME explanation scraper recognizes more formats (Rationale,
+    Explanation, Educational Objective, Answer Explanation, plus a
+    last-ditch "everything after Correct Answer: X").
+  • UWorld explanation scraper falls back to .explanation-container /
+    #explanation / [class*="explanation"] for Step 3 pages where
+    .right-content isn't used.
+  • manifest.json: broader UWorld URL matches; all_frames:true on the
+    UWorld content script so it reaches nested testinterface frames.
+
+After you delete the underscore-prefixed file and reload the extension,
+try the highlight-to-TTS again on your UWorld Step 3 tab.

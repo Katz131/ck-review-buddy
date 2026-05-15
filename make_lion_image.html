@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Generating LinkedIn Image...</title>
+<style>
+  body { margin: 0; background: #111; color: #fff; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+  #status { font-size: 20px; margin-bottom: 20px; }
+  canvas { border: 1px solid #333; max-width: 90vw; }
+  #download-btn { display: none; margin-top: 20px; padding: 14px 32px; background: #0a66c2; color: #fff; border: none; border-radius: 24px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  #download-btn:hover { background: #004182; }
+</style>
+</head>
+<body>
+  <div id="status">Loading lion image from Unsplash...</div>
+  <canvas id="canvas" width="1200" height="628"></canvas>
+  <button id="download-btn" onclick="downloadImage()">Download Image for LinkedIn</button>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const status = document.getElementById('status');
+
+const img = new Image();
+img.crossOrigin = 'anonymous';
+img.onload = function() {
+  status.textContent = 'Compositing image...';
+
+  // Draw lion image - cover the canvas
+  const scale = Math.max(1200 / img.width, 628 / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  const x = (1200 - w) / 2;
+  const y = -h * 0.1; // shift up to focus on face
+  ctx.drawImage(img, x, y, w, h);
+
+  // Dark gradient overlay on left side
+  const grad = ctx.createLinearGradient(0, 0, 1200, 0);
+  grad.addColorStop(0, 'rgba(0,0,0,0.88)');
+  grad.addColorStop(0.45, 'rgba(0,0,0,0.72)');
+  grad.addColorStop(0.7, 'rgba(0,0,0,0.2)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1200, 628);
+
+  // Subtle bottom gradient for readability
+  const gradB = ctx.createLinearGradient(0, 500, 0, 628);
+  gradB.addColorStop(0, 'rgba(0,0,0,0)');
+  gradB.addColorStop(1, 'rgba(0,0,0,0.4)');
+  ctx.fillStyle = gradB;
+  ctx.fillRect(0, 500, 1200, 128);
+
+  // Quote text
+  ctx.textBaseline = 'top';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 8;
+
+  // Line 1
+  ctx.font = 'bold 40px Georgia, serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText('If your demo can\'t', 60, 120);
+
+  // Line 2 with "chaos" highlighted
+  ctx.fillText('survive ', 60, 172);
+  const w1 = ctx.measureText('survive ').width;
+  ctx.fillStyle = '#f5a623';
+  ctx.fillText('chaos', 60 + w1, 172);
+  const w2 = ctx.measureText('chaos').width;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(',', 60 + w1 + w2, 172);
+
+  // Line 3
+  ctx.fillText('it\'s not a demo.', 60, 232);
+
+  // Line 4 - punchline
+  ctx.font = 'bold 42px Georgia, serif';
+  ctx.fillStyle = '#f5a623';
+  ctx.fillText('It\'s a performance.', 60, 310);
+
+  // Divider
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#f5a623';
+  ctx.fillRect(60, 380, 80, 4);
+
+  // Tagline
+  ctx.font = 'italic 20px Georgia, serif';
+  ctx.fillStyle = '#cccccc';
+  ctx.shadowBlur = 4;
+  ctx.fillText('The Wild Animal Test for AI', 60, 400);
+
+  // Credit
+  ctx.font = '12px -apple-system, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.shadowBlur = 0;
+  ctx.fillText('Photo: Rob Potter / Unsplash', 60, 590);
+
+  status.textContent = 'Done! Preview below. Click the button to download.';
+  document.getElementById('download-btn').style.display = 'inline-block';
+};
+
+img.onerror = function() {
+  status.textContent = 'Failed to load image. Try refreshing the page.';
+};
+
+img.src = 'https://images.unsplash.com/photo-1546182990-dffeafbe841d?w=1400&q=80';
+
+function downloadImage() {
+  const link = document.createElement('a');
+  link.download = 'ai_wild_animal_test.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+</script>
+</body>
+</html>
