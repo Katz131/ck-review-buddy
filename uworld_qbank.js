@@ -127,10 +127,64 @@
     var isCorrect = null;
     var letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 
+    // v295: Detect table-format answers (e.g., amiodarone electrophysiology table).
+    // UWorld uses <td> (NOT <th>) for column headers in the first non-answer <tr>.
+    // Row structure: [header-row with class ng-star-inserted] then [answer rows with class answer-choice-background].
+    // Header row has a big concatenated td[0] + individual tds for each column.
+    var tableHeaders = [];
+    try {
+      var ansContainer = document.getElementById('answerContainer');
+      if (ansContainer) {
+        var allTrs = ansContainer.querySelectorAll('tr');
+        for (var hi = 0; hi < allTrs.length; hi++) {
+          if (allTrs[hi].classList.contains('answer-choice-background')) break;
+          // This is a non-answer row — check if it has multiple short <td> cells (column headers)
+          var headerCells = allTrs[hi].querySelectorAll('td');
+          // Skip td[0] — it's the concatenated version of all headers
+          // Use td[1], td[2], etc. which are individual headers
+          if (headerCells.length >= 3) {
+            for (var hci = 1; hci < headerCells.length; hci++) {
+              var ht = headerCells[hci].innerText.trim();
+              if (ht && ht.length > 1 && ht.length < 50) tableHeaders.push(ht);
+            }
+            if (tableHeaders.length >= 2) break;
+          }
+        }
+      }
+      if (tableHeaders.length >= 2) {
+        console.log('[CK Buddy] Table-format Q detected! Headers:', tableHeaders.join(' | '));
+      }
+    } catch(e) { tableHeaders = []; }
+
     answerRows.forEach(function(tr, i) {
       var letter = letters[i] || String.fromCharCode(65 + i);
-      var ansSpan = tr.querySelector('[id^="answerhighlight"]');
-      var choiceText = ansSpan ? ansSpan.innerText.trim() : '';
+      var choiceText = '';
+
+      // v295: For table questions, build choice text from individual <td> cells
+      // paired with column headers. Each answer row has:
+      //   td[0]=letter, td[1]=big-concatenated-span, td[2..N]=individual values, td[last]=percentage
+      // We use td[2..2+headerCount] for the individual values.
+      if (tableHeaders.length >= 2) {
+        var tds = tr.querySelectorAll('td');
+        // Individual value cells start at index 2 (after letter + big-span)
+        if (tds.length >= 2 + tableHeaders.length) {
+          var paired = [];
+          for (var ci = 0; ci < tableHeaders.length; ci++) {
+            var cellVal = tds[2 + ci] ? tds[2 + ci].innerText.trim() : '?';
+            paired.push(tableHeaders[ci] + ': ' + cellVal);
+          }
+          choiceText = paired.join(', ');
+          console.log('[CK Buddy] Table choice ' + letter + ': ' + choiceText);
+        }
+      }
+
+      // Fallback: use the normal answerHighlight span if table pairing didn't work
+      if (!choiceText) {
+        var ansSpan = tr.querySelector('[id^="answerhighlight"]');
+        choiceText = ansSpan ? ansSpan.innerText.trim() : '';
+        // Strip percentage stats that UWorld shows in review mode
+        choiceText = choiceText.replace(/\s*\(\d+%?\)\s*/g, ' ').trim();
+      }
 
       choices.push(letter + '. ' + choiceText);
 
@@ -315,7 +369,9 @@
 
       if (i === startingQuestion && actualNow === i) {
         showOverlay('Scraping current Q' + i + ' (1/' + target + ')...', 'Scraping Q' + i + ' (current page)');
-        await new Promise(function(r) { setTimeout(r, 400); });
+        // v292: Give the DOM extra time to settle for the starting question —
+        // explanation/answer containers may still be loading if user just opened review.
+        await new Promise(function(r) { setTimeout(r, 800); });
       } else if (actualNow !== i) {
         // Already navigated above via position drift handler
         showOverlay('Scraping Q' + i + ' (' + scraped + '/' + target + ')…');
@@ -392,17 +448,20 @@
       await new Promise(function(r) { setTimeout(r, 300); });
     }
 
-    // Navigate back to starting question
-    showOverlay('Returning to Q' + startingQuestion + '…');
-    var prevStemBeforeReturn = (document.getElementById('questionText') || {}).innerText || '';
-    prevStemBeforeReturn = prevStemBeforeReturn.substring(0, 200);
-    navigateToQuestion(startingQuestion);
-    await waitForQuestionLoad(prevStemBeforeReturn, 6000);
-    // Verify we actually returned
-    var returnedNum = getCurrentItemNumber();
-    if (returnedNum !== startingQuestion) {
+    // Navigate back to starting question (skip if we're already there)
+    var currentNow = getCurrentItemNumber();
+    if (currentNow && currentNow !== startingQuestion) {
+      showOverlay('Returning to Q' + startingQuestion + '…');
+      var prevStemBeforeReturn = (document.getElementById('questionText') || {}).innerText || '';
+      prevStemBeforeReturn = prevStemBeforeReturn.substring(0, 200);
       navigateToQuestion(startingQuestion);
-      await new Promise(function(r) { setTimeout(r, 2000); });
+      await waitForQuestionLoad(prevStemBeforeReturn, 6000);
+      // Verify we actually returned
+      var returnedNum = getCurrentItemNumber();
+      if (returnedNum !== startingQuestion) {
+        navigateToQuestion(startingQuestion);
+        await new Promise(function(r) { setTimeout(r, 2000); });
+      }
     }
     showOverlay('Back on Q' + (getCurrentItemNumber() || startingQuestion) + ' ✓');
 
@@ -472,7 +531,16 @@
         console.log('[CK Buddy] UWorld shifted! Navigating back to Q' + capturedStart + ' before scraping');
         navigateToQuestion(capturedStart);
       }
-      runFullScrape(limit, capturedStart).catch(function(e) {
+      runFullScrape(limit, capturedStart).then(function(questions) {
+        // v292: Log completion so we can debug "skipped" questions
+        console.log('[CK Buddy] runFullScrape completed. Questions captured:', questions ? questions.length : 0);
+        if (questions) {
+          questions.forEach(function(q, idx) {
+            console.log('[CK Buddy]   Q' + (q.absoluteId || idx) + ': choices=' + q.choices.length +
+              ' correct=' + q.isCorrect + ' stem=' + (q.questionText || '').substring(0, 60));
+          });
+        }
+      }).catch(function(e) {
         console.error('[CK Buddy] UWorld Qbank scrape error:', e);
         removeOverlay();
       });

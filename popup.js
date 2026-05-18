@@ -1,7 +1,7 @@
 // popup.js — CK Review Buddy Game Logic
 
 // VERSION: must match content.js AND manifest.json -- run `node bump.js` to update all 3
-const CKRB_VERSION = '277';
+const CKRB_VERSION = '296';
 const STORAGE_KEY_QUESTIONS = 'ckrb_questions';
 const STORAGE_KEY_STATUS    = 'ckrb_status';
 
@@ -893,7 +893,7 @@ async function directNavToQuestion(targetQ, source) {
 function _ckrbSanitizeVignetteQuote(quote, stem) {
   var q = (quote || '').trim();
   // Strip surrounding quotes the model sometimes wraps around its own output
-  q = q.replace(/^['"\u201c\u201d\u2018\u2019]+|['"\u201c\u201d\u2018\u2019]+$/g, '').trim();
+  q = q.replace(/^['"“”‘’]+|['"“”‘’]+$/g, '').trim();
 
   var FORBIDDEN_PATTERNS = [
     /^item\s+\d+\s+of\s+\d+$/i,
@@ -1295,6 +1295,28 @@ function _explSplitSentences(text) {
   return out.length ? out : [text];
 }
 
+/* _explCleanForSSML REMOVED in v279 -- replaced by _explSanitizeForTTS (charCodeAt-based).
+   Old code stripped: zero-width chars U+200B-U+200F, line/para seps U+2028-U+2029,
+   BOM U+FEFF, replacement chars U+FFFD-U+FFFF, and C0/C1 control chars.
+   DO NOT paste old regex back -- it contained literal null/control bytes. */
+
+function _explSanitizeForTTS(s) {
+  // v279: Strip Unicode chars that cause Azure TTS failures.
+  // Uses charCodeAt — NO literal Unicode in source to avoid U+2028 bugs.
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c >= 0x200B && c <= 0x200F) continue; // zero-width spaces/marks
+    if (c === 0x2028 || c === 0x2029) continue; // line/paragraph separator
+    if (c === 0xFEFF) continue; // BOM
+    if (c === 0xFFFD || c === 0xFFFE || c === 0xFFFF) continue; // replacement/nonchars
+    if (c < 0x20 && c !== 0x09 && c !== 0x0A && c !== 0x0D) continue; // C0 control (keep tab/nl/cr)
+    if (c >= 0x80 && c <= 0x9F) continue; // C1 control chars
+    out += s.charAt(i);
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 function _explEscapeXml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
@@ -1364,10 +1386,34 @@ async function _explSpeakChunked(text, skipConfirm) {
   console.log('[CK Buddy] Popup chunked TTS: ' + chunks.length + ' sentences via Azure REST');
   var voice = 'en-US-JennyNeural';
 
-  async function synthChunk(chunkText) {
-    var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'>" +
-      "<prosody rate='-5%'>" + _explEscapeXml(chunkText) + "</prosody></voice></speak>";
-    var resp = await fetch('https://' + azureRegion + '.tts.speech.microsoft.com/cognitiveservices/v1', {
+  async function synthChunk(rawChunkText) {
+    var chunkText = _explSanitizeForTTS(rawChunkText);
+    if (!chunkText) return new ArrayBuffer(0);
+
+    // v289: Try routing through content script SDK first (avoids REST 429s)
+    try {
+      var tabs = await chrome.tabs.query({ url: ['*://apps.uworld.com/*', '*://*.amboss.com/*', '*://*.starttest.com/*', '*://*.nbme.org/*', '*://*.ccscases.com/*'] });
+      var tab = tabs.find(function(t) { return t.id; });
+      if (tab) {
+        var resp = await chrome.tabs.sendMessage(tab.id, { type: 'TTS_SYNTH', text: chunkText });
+        if (resp && resp.ok && resp.audioB64) {
+          console.log('[CK Buddy] Popup TTS via content script SDK OK');
+          var binary = atob(resp.audioB64);
+          var bytes = new Uint8Array(binary.length);
+          for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return bytes.buffer;
+        }
+        if (resp && !resp.ok) {
+          console.warn('[CK Buddy] Content script TTS failed: ' + resp.error + ' — trying REST');
+        }
+      }
+    } catch(e) {
+      console.warn('[CK Buddy] Content script TTS message failed: ' + e.message + ' — trying REST');
+    }
+
+    // Fallback: direct REST call
+    var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'>" + "<prosody rate='-5%'>" + _explEscapeXml(chunkText) + "</prosody></voice></speak>";
+    var restResp = await fetch('https://' + azureRegion + '.tts.speech.microsoft.com/cognitiveservices/v1', {
       method: 'POST',
       headers: {
         'Ocp-Apim-Subscription-Key': azureKey,
@@ -1377,8 +1423,8 @@ async function _explSpeakChunked(text, skipConfirm) {
       },
       body: ssml
     });
-    if (!resp.ok) throw new Error('Azure REST ' + resp.status);
-    return await resp.arrayBuffer();
+    if (!restResp.ok) throw new Error('Azure REST ' + restResp.status);
+    return await restResp.arrayBuffer();
   }
 
   // v246: Loop-based playback with prefetch, back/replay/next/stop transport
@@ -1434,7 +1480,8 @@ async function _explSpeakChunked(text, skipConfirm) {
     } catch(err) {
       console.warn('[CK Buddy] Chunk ' + idx + ' error:', err);
       if (idx === 0) console.error('[CK Buddy] First chunk failed — check Azure key/region in settings');
-      break;
+      // v291: Skip failed chunks — do NOT fall back to local speechSynthesis
+      // (local voice sounds different and plays delayed, confusing the user)
     }
     if (mySeq !== _explSpeakSeq) break;
 
@@ -2073,7 +2120,7 @@ function handleAmbossAnswer(selectedIdx, q) {
 document.getElementById('btnCollect').addEventListener('click', async () => {
   const r = await new Promise(resolve => chrome.storage.local.get(['ckrb_frame_data'], resolve));
   const frames = r.ckrb_frame_data || [];
-  
+
   if (frames.length === 0) {
     alert('No data collected yet. Navigate through your questions first, then click Collect.');
     return;
@@ -2106,7 +2153,7 @@ document.getElementById('btnCollect').addEventListener('click', async () => {
 
   alert('Collected ' + questions.length + ' questions. Starting AI analysis...');
   chrome.runtime.sendMessage({ type: 'START_PROCESSING', questions });
-  
+
   // Show processing screen
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-processing').classList.add('active');
@@ -2489,28 +2536,28 @@ function _ckrbShowFailedQuestionDebug(q, qNum) {
       '<div style="padding:14px 18px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;background:rgba(239,68,68,0.12)">' +
         '<div>' +
           '<div style="font-size:11px;color:#fca5a5;font-weight:700;letter-spacing:.08em">Q' + qNum + ' SCRAPE FAILED</div>' +
-          '<div style="font-size:18px;font-weight:800;margin-top:2px">\u26a0\ufe0f THIS QUESTION DID NOT WORK</div>' +
+          '<div style="font-size:18px;font-weight:800;margin-top:2px">⚠️ THIS QUESTION DID NOT WORK</div>' +
         '</div>' +
         '<button id="__ckrb_failed_close" style="background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px">Close</button>' +
       '</div>' +
       '<div style="padding:14px 18px;overflow-y:auto;flex:1">' +
         '<div style="font-size:13px;color:#fbbf24;margin-bottom:8px"><strong>Reason:</strong> ' + escHtml(reason) + '</div>' +
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px;color:#cbd5e1;margin-bottom:12px">' +
-          '<div><span style="color:#94a3b8">EDF found:</span> ' + (dbg.edfFound ? '\u2713' : '\u2717') + '</div>' +
+          '<div><span style="color:#94a3b8">EDF found:</span> ' + (dbg.edfFound ? '✓' : '✗') + '</div>' +
           '<div><span style="color:#94a3b8">Body text:</span> ' + (dbg.bodyTextLength || 0) + ' chars</div>' +
           '<div><span style="color:#94a3b8">Radios:</span> ' + (dbg.radioCount != null ? dbg.radioCount : 'n/a') + '</div>' +
           '<div><span style="color:#94a3b8">Iframes:</span> ' + (dbg.iframeCount != null ? dbg.iframeCount : 'n/a') + '</div>' +
-          '<div><span style="color:#94a3b8">Choices regex:</span> ' + (dbg.choicesRegexMatch ? '\u2713' : '\u2717') + '</div>' +
-          '<div><span style="color:#94a3b8">Correct-answer regex:</span> ' + (dbg.correctAnswerRegexMatch ? '\u2713' : '\u2717') + '</div>' +
-          '<div><span style="color:#94a3b8">Rationale regex:</span> ' + (dbg.rationaleRegexMatch ? '\u2713' : '\u2717') + '</div>' +
-          '<div><span style="color:#94a3b8">Has Next btn:</span> ' + (dbg.hasNextBtn ? '\u2713' : '\u2717') + '</div>' +
+          '<div><span style="color:#94a3b8">Choices regex:</span> ' + (dbg.choicesRegexMatch ? '✓' : '✗') + '</div>' +
+          '<div><span style="color:#94a3b8">Correct-answer regex:</span> ' + (dbg.correctAnswerRegexMatch ? '✓' : '✗') + '</div>' +
+          '<div><span style="color:#94a3b8">Rationale regex:</span> ' + (dbg.rationaleRegexMatch ? '✓' : '✗') + '</div>' +
+          '<div><span style="color:#94a3b8">Has Next btn:</span> ' + (dbg.hasNextBtn ? '✓' : '✗') + '</div>' +
         '</div>' +
         (dbg.bodyTextPrefix ?
           '<div style="margin-top:10px"><div style="font-size:11px;color:#94a3b8;font-weight:700;margin-bottom:4px">BODY TEXT (first 600)</div>' +
           '<pre style="background:#020617;border:1px solid #1e293b;border-radius:6px;padding:8px;font-size:11px;color:#94a3b8;white-space:pre-wrap;max-height:160px;overflow:auto;margin:0">' + escHtml(dbg.bodyTextPrefix) + '</pre></div>' : '') +
         '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:12px;color:#818cf8;font-weight:700">Full debug JSON (copy for diagnosis)</summary>' +
           '<pre style="background:#020617;border:1px solid #1e293b;border-radius:6px;padding:8px;font-size:10px;color:#cbd5e1;white-space:pre-wrap;max-height:280px;overflow:auto;margin-top:6px">' + escHtml(dbgJson) + '</pre>' +
-          '<button id="__ckrb_failed_copy" style="margin-top:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px">\ud83d\udccb Copy debug JSON</button>' +
+          '<button id="__ckrb_failed_copy" style="margin-top:6px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px">📋 Copy debug JSON</button>' +
         '</details>' +
       '</div>' +
     '</div>';
@@ -2519,7 +2566,7 @@ function _ckrbShowFailedQuestionDebug(q, qNum) {
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   const copyBtn = document.getElementById('__ckrb_failed_copy');
   if (copyBtn) copyBtn.addEventListener('click', () => {
-    try { navigator.clipboard.writeText(dbgJson); copyBtn.textContent = '\u2713 Copied'; }
+    try { navigator.clipboard.writeText(dbgJson); copyBtn.textContent = '✓ Copied'; }
     catch(_) { copyBtn.textContent = 'Copy failed'; }
   });
 }
@@ -2557,8 +2604,8 @@ function buildGrid(questions, total) {
       btn.style.background = 'rgba(245, 158, 11, 0.15)';
       btn.style.borderColor = '#f59e0b';
       btn.style.color = '#fbbf24';
-      btn.textContent = '\u26a0';
-      btn.title = 'Q' + i + ' \u2014 SCRAPE FAILED: ' + (q.failureReason || 'unknown');
+      btn.textContent = '⚠';
+      btn.title = 'Q' + i + ' — SCRAPE FAILED: ' + (q.failureReason || 'unknown');
       btn.addEventListener('click', () => _ckrbShowFailedQuestionDebug(q, i));
     } else if (notReady) {
       _gridMissing.push(q || { id: i - 1, absoluteId: i, missing: true });
@@ -2641,7 +2688,7 @@ function buildNavGrid(sections, perSection, activeSection) {
   grid.style.gridTemplateColumns = 'repeat(10, 1fr)';
   status.textContent = 'Click any question to jump.';
 
-  const sectionsToShow = activeSection === 0 ? 
+  const sectionsToShow = activeSection === 0 ?
     Array.from({length: sections}, (_, i) => i + 1) : [activeSection];
 
   for (const s of sectionsToShow) {

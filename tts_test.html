@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head><title>Azure TTS Test</title></head>
+<body style="background:#1e293b;color:#e2e8f0;font-family:system-ui;padding:40px;max-width:600px;margin:0 auto;">
+<h2>Azure TTS Test</h2>
+<p>This page reads your Azure key from CK Buddy's storage and tests TTS directly.</p>
+<div id="status" style="background:#334155;padding:12px;border-radius:8px;margin:16px 0;">Loading key from storage...</div>
+<button id="testBtn" disabled onclick="testTTS()" style="padding:12px 24px;font-size:16px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;">Test Azure TTS</button>
+<button onclick="testLocal()" style="padding:12px 24px;font-size:16px;background:#f59e0b;color:#000;border:none;border-radius:8px;cursor:pointer;margin-left:8px;">Test Local TTS</button>
+<div id="log" style="margin-top:20px;background:#0f172a;padding:16px;border-radius:8px;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:400px;overflow-y:auto;"></div>
+<script>
+var azureKey = '', azureRegion = '';
+var logEl = document.getElementById('log');
+function log(msg) { logEl.textContent += new Date().toLocaleTimeString() + ' ' + msg + '\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+// Try to get key from chrome.storage
+try {
+  chrome.storage.sync.get(['ckrb_azure_key', 'ckrb_azure_region'], function(r) {
+    azureKey = (r && r.ckrb_azure_key) ? r.ckrb_azure_key.trim() : '';
+    azureRegion = (r && r.ckrb_azure_region) ? r.ckrb_azure_region.trim().toLowerCase() : '';
+    if (azureKey && azureRegion) {
+      document.getElementById('status').innerHTML = 'Key: ' + azureKey.substring(0,4) + '***' + azureKey.slice(-4) + '<br>Region: ' + azureRegion;
+      document.getElementById('testBtn').disabled = false;
+      log('Key loaded from storage: ' + azureKey.substring(0,4) + '*** region=' + azureRegion);
+    } else {
+      document.getElementById('status').textContent = 'No Azure key found in storage!';
+      log('ERROR: No key/region in chrome.storage.sync');
+    }
+  });
+} catch(e) {
+  document.getElementById('status').textContent = 'Cannot access chrome.storage — open this page from the extension folder';
+  log('ERROR: ' + e.message);
+}
+
+async function testTTS() {
+  log('Testing Azure REST TTS...');
+  var text = 'A 32 year old man comes to the office for follow up. This is a test of the Azure text to speech service.';
+  var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='en-US-JennyNeural'><prosody rate='-5%'>" + text + "</prosody></voice></speak>";
+  try {
+    var url = 'https://' + azureRegion + '.tts.speech.microsoft.com/cognitiveservices/v1';
+    log('POST ' + url);
+    var resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': azureKey,
+        'Content-Type': 'application/ssml+xml',
+        'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+        'User-Agent': 'ckrb-test'
+      },
+      body: ssml
+    });
+    log('Response: ' + resp.status + ' ' + resp.statusText);
+    if (resp.status === 429) {
+      var retryAfter = resp.headers.get('Retry-After');
+      log('RATE LIMITED (429)! Retry-After header: ' + (retryAfter || 'not set'));
+      log('Your Azure quota may be exhausted. Check portal.azure.com for usage.');
+      return;
+    }
+    if (!resp.ok) { log('ERROR: HTTP ' + resp.status); return; }
+    var buf = await resp.arrayBuffer();
+    log('Audio received: ' + buf.byteLength + ' bytes');
+    var blob = new Blob([buf], { type: 'audio/mpeg' });
+    var audio = new Audio(URL.createObjectURL(blob));
+    audio.play();
+    log('Playing audio...');
+  } catch(e) {
+    log('FETCH ERROR: ' + e.message);
+  }
+}
+
+function testLocal() {
+  log('Testing local speechSynthesis...');
+  speechSynthesis.cancel();
+  var u = new SpeechSynthesisUtterance('A 32 year old man comes to the office for follow up. This is a test of the local browser text to speech.');
+  u.rate = 0.95;
+  var voices = speechSynthesis.getVoices();
+  log('Available voices: ' + voices.length);
+  for (var i = 0; i < voices.length; i++) {
+    if (/en/i.test(voices[i].lang)) log('  ' + voices[i].name + ' (' + voices[i].lang + ')');
+  }
+  u.onstart = function() { log('Local TTS started'); };
+  u.onend = function() { log('Local TTS ended'); };
+  u.onerror = function(e) { log('Local TTS error: ' + e.error); };
+  speechSynthesis.speak(u);
+}
+</script>
+</body>
+</html>

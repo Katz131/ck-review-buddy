@@ -2,7 +2,7 @@
 
 (function () {
   // VERSION: must match popup.js AND manifest.json -- run `node bump.js` to update all 3
-  var CKRB_VERSION = '277';
+  var CKRB_VERSION = '296';
   try { console.log('[CK Buddy v' + CKRB_VERSION + '] content.js loaded on', location.hostname); } catch(_) {}
 
   /* ── ABORT FLAG ── */
@@ -635,6 +635,70 @@
       sendResponse({ ok: true, count: msg.cards.length });
       return true;
     }
+    // v289: popup routes TTS through content script's SDK to avoid REST 429s
+    if (msg.type === 'TTS_SYNTH') {
+      var _ttsText = msg.text || '';
+      console.log('[CK Buddy TTS] TTS_SYNTH request from popup: "' + _ttsText.substring(0, 40) + '..."');
+      chrome.storage.sync.get(['ckrb_azure_key', 'ckrb_azure_region'], function(r) {
+        var k = r && r.ckrb_azure_key ? String(r.ckrb_azure_key).trim() : '';
+        var reg = r && r.ckrb_azure_region ? String(r.ckrb_azure_region).trim().toLowerCase() : '';
+        if (!k || !reg) { sendResponse({ ok: false, error: 'no key' }); return; }
+        var SDK = null;
+        try { SDK = SpeechSDK; } catch(_) {}
+        if (!SDK) try { SDK = window.SpeechSDK; } catch(_) {}
+        if (!SDK) try { SDK = globalThis.SpeechSDK; } catch(_) {}
+        if (!SDK) {
+          // No SDK — try REST as fallback
+          var voice = 'en-US-JennyNeural';
+          var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'><prosody rate='-5%'>" + _ckrbEscapeXml(_ttsText) + "</prosody></voice></speak>";
+          fetch('https://' + reg + '.tts.speech.microsoft.com/cognitiveservices/v1', {
+            method: 'POST',
+            headers: { 'Ocp-Apim-Subscription-Key': k, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3', 'User-Agent': 'ckrb' },
+            body: ssml
+          }).then(function(resp) {
+            if (!resp.ok) throw new Error('REST ' + resp.status);
+            return resp.arrayBuffer();
+          }).then(function(buf) {
+            // Convert ArrayBuffer to base64 for message passing
+            var bytes = new Uint8Array(buf);
+            var binary = '';
+            for (var i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+            sendResponse({ ok: true, audioB64: btoa(binary) });
+          }).catch(function(err) {
+            sendResponse({ ok: false, error: err.message });
+          });
+          return;
+        }
+        // Use SDK
+        var voice = 'en-US-JennyNeural';
+        var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'><prosody rate='-5%'>" + _ckrbEscapeXml(_ttsText) + "</prosody></voice></speak>";
+        try {
+          var sc = SDK.SpeechConfig.fromSubscription(k, reg);
+          sc.speechSynthesisVoiceName = voice;
+          sc.speechSynthesisOutputFormat = SDK.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
+          var synth = new SDK.SpeechSynthesizer(sc, null);
+          synth.speakSsmlAsync(ssml, function(result) {
+            try { synth.close(); } catch(_) {}
+            if (result && result.audioData && result.audioData.byteLength) {
+              var bytes = new Uint8Array(result.audioData);
+              var binary = '';
+              for (var i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+              console.log('[CK Buddy TTS] TTS_SYNTH SDK OK, ' + result.audioData.byteLength + ' bytes');
+              sendResponse({ ok: true, audioB64: btoa(binary) });
+            } else {
+              console.warn('[CK Buddy TTS] TTS_SYNTH SDK returned empty, reason=' + (result && result.reason));
+              sendResponse({ ok: false, error: 'SDK empty audio, reason=' + (result && result.reason) });
+            }
+          }, function(err) {
+            try { synth.close(); } catch(_) {}
+            sendResponse({ ok: false, error: 'SDK error: ' + (err && err.message || err) });
+          });
+        } catch(e) {
+          sendResponse({ ok: false, error: 'SDK threw: ' + e.message });
+        }
+      });
+      return true; // async sendResponse
+    }
   });
 
   console.log('[CK Buddy v' + CKRB_VERSION + '] onMessage listener registered on', location.hostname);
@@ -1093,6 +1157,7 @@
   // call grabs its own seq and the deferred speak() bails if a newer call
   // has superseded it.
   var _ckrbSpeakSeq = 0;
+  var _ckrbAzureDown = false; // v287: set true after Azure 429/fail — skips retries, uses local TTS
   // v156c: REMOVED the 10s pause()→resume() keep-alive — it was stalling
   // Brave's speech engine mid-utterance, causing silent playback. The
   // visibilitychange resume below is enough for tab-switching. No-op
@@ -1788,13 +1853,60 @@
     var voice = 'en-US-JennyNeural';
     var cache = {};
 
-    function synth(idx, cb) {
-      if (mySeq !== _ckrbSpeakSeq) return;
-      if (idx >= chunkJobs.length) { if (cb) cb(null); return; }
-      if (cache[idx]) { if (cb) cb(cache[idx]); return; }
+    function synth(idx, cb, _retryCount) {
+      _retryCount = _retryCount || 0;
+      console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') called, retry=' + _retryCount + ' azureDown=' + _ckrbAzureDown + ' seqMatch=' + (mySeq === _ckrbSpeakSeq));
+      if (mySeq !== _ckrbSpeakSeq) { console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') ABORTED: seq mismatch'); return; }
+      if (idx >= chunkJobs.length) { console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') DONE: past last chunk'); if (cb) cb(null); return; }
+      if (cache[idx]) { console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') CACHED: returning cached data'); if (cb) cb(cache[idx]); return; }
+      // v287: Azure known down — skip everything, return null immediately for local TTS fallback
+      if (_ckrbAzureDown) {
+        console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') AZURE DOWN — returning null for local TTS');
+        cache[idx] = null; if (cb) cb(null); return;
+      }
       var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'>" +
         "<prosody rate='-5%'>" + _ckrbEscapeXml(chunkJobs[idx].text) + "</prosody></voice></speak>";
+      // v288: single REST attempt (no retries — saves quota)
+      function _synthRestOnce() {
+        console.log('[CK Buddy TTS DEBUG] chunk ' + idx + ' trying REST API (single attempt)');
+        fetch('https://' + region + '.tts.speech.microsoft.com/cognitiveservices/v1', {
+          method: 'POST',
+          headers: {
+            'Ocp-Apim-Subscription-Key': key,
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+            'User-Agent': 'ckrb'
+          },
+          body: ssml
+        }).then(function(resp) {
+          console.log('[CK Buddy TTS DEBUG] chunk ' + idx + ' REST status=' + resp.status);
+          if (!resp.ok) {
+            if (resp.status === 429) {
+              console.warn('[CK Buddy TTS] chunk ' + idx + ' REST 429 — Azure rate limited, flagging down');
+              _ckrbAzureDown = true;
+              // Auto-reset after 60s so Azure can recover
+              setTimeout(function() { _ckrbAzureDown = false; console.log('[CK Buddy TTS] Azure down flag reset after 60s cooldown'); }, 60000);
+            }
+            throw new Error('REST ' + resp.status);
+          }
+          return resp.arrayBuffer().then(function(buf) {
+            if (mySeq !== _ckrbSpeakSeq) return;
+            console.log('[CK Buddy TTS DEBUG] chunk ' + idx + ' REST OK, ' + buf.byteLength + ' bytes');
+            cache[idx] = { audioData: buf, boundaries: [] };
+            if (cb) cb(cache[idx]);
+          });
+        }).catch(function(err) {
+          if (mySeq !== _ckrbSpeakSeq) return;
+          console.warn('[CK Buddy TTS] chunk ' + idx + ' REST failed: ' + (err && err.message || err));
+          _ckrbAzureDown = true;
+          setTimeout(function() { _ckrbAzureDown = false; console.log('[CK Buddy TTS] Azure down flag reset after 60s cooldown'); }, 60000);
+          cache[idx] = null;
+          if (cb) cb(null);
+        });
+      }
+      // v288: SDK try once → REST try once → flag down. No retries. Saves Azure quota.
       try {
+        console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') creating SDK synthesizer, key=' + key.substring(0,4) + '*** region=' + region);
         var sc = SDK.SpeechConfig.fromSubscription(key, region);
         sc.speechSynthesisVoiceName = voice;
         sc.speechSynthesisOutputFormat = SDK.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
@@ -1805,7 +1917,7 @@
         s.wordBoundary = function(sender, ev) {
           if (ev && typeof ev.audioOffset === 'number' && typeof ev.textOffset === 'number') {
             boundaries.push({
-              audioOffsetMs: ev.audioOffset / 10000,  // Azure gives ticks (100ns units) → ms
+              audioOffsetMs: ev.audioOffset / 10000,
               textOffset: ev.textOffset,
               wordLength: ev.wordLength || 0,
               text: ev.text || ''
@@ -1815,16 +1927,25 @@
 
         s.speakSsmlAsync(ssml, function(result) {
           try { s.close(); } catch(_) {}
+          console.log('[CK Buddy TTS DEBUG] synth(' + idx + ') SDK callback — hasResult:', !!result, 'hasAudio:', !!(result && result.audioData && result.audioData.byteLength), 'reason:', result && result.reason, 'err:', result && result.errorDetails);
           if (mySeq !== _ckrbSpeakSeq) return;
           if (result && result.audioData && result.audioData.byteLength) {
-            console.log('[CK Buddy TTS] chunk ' + idx + ' synth done: ' + boundaries.length + ' word boundaries captured');
+            console.log('[CK Buddy TTS] chunk ' + idx + ' SDK OK: ' + boundaries.length + ' boundaries, ' + result.audioData.byteLength + ' bytes');
             cache[idx] = { audioData: result.audioData, boundaries: boundaries };
+            if (cb) cb(cache[idx]);
           } else {
-            cache[idx] = null;
+            console.warn('[CK Buddy TTS] chunk ' + idx + ' SDK empty — trying REST once');
+            _synthRestOnce();
           }
-          if (cb) cb(cache[idx]);
-        }, function() { try { s.close(); } catch(_) {} cache[idx] = null; if (cb) cb(null); });
-      } catch(_) { cache[idx] = null; if (cb) cb(null); }
+        }, function(err) {
+          try { s.close(); } catch(_) {}
+          console.warn('[CK Buddy TTS] chunk ' + idx + ' SDK error: ' + (err && err.message || err) + ' — trying REST once');
+          _synthRestOnce();
+        });
+      } catch(e) {
+        console.warn('[CK Buddy TTS] chunk ' + idx + ' SDK threw: ' + e.message + ' — trying REST once');
+        _synthRestOnce();
+      }
     }
 
     // ── Custom DOM confirm dialog (window.confirm may be blocked on UWorld) ──
@@ -2034,6 +2155,7 @@
 
     // ── Process one chunk at a time — TEST MODE ──
     function doChunk(idx) {
+      console.log('[CK Buddy TTS DEBUG] doChunk(' + idx + ') called, azureDown=' + _ckrbAzureDown);
       if (mySeq !== _ckrbSpeakSeq) return;
       if (idx >= chunkJobs.length) {
         _ckrbTTSSpeaking = false;
@@ -2060,13 +2182,67 @@
         (job.domStart < _ckrbWordRanges.length ? _ckrbWordRanges[job.domStart].text : '?') + '" BEFORE audio');
       _ckrbHighlightWordByIndex(job.domStart);
 
-      // Prefetch next chunk
-      if (idx + 1 < chunkJobs.length) synth(idx + 1, function() {});
+      // v288: prefetch DISABLED to conserve Azure quota (was doubling API calls)
+      // if (idx + 1 < chunkJobs.length) synth(idx + 1, function() {});
 
       synth(idx, function(data) {
         if (mySeq !== _ckrbSpeakSeq) return;
         if (!data) {
-          console.log('[CK Buddy TTS] chunk ' + idx + ' synth returned null — pausing anyway');
+          // v287: Azure completely down — fall back to browser speechSynthesis
+          console.log('[CK Buddy TTS DEBUG] chunk ' + idx + ' data=null → entering local TTS fallback');
+          try {
+            var ss = window.speechSynthesis || (window.parent && window.parent.speechSynthesis);
+            console.log('[CK Buddy TTS DEBUG] speechSynthesis available:', !!ss, 'window.speechSynthesis:', !!window.speechSynthesis, 'parent:', !!(window.parent && window.parent.speechSynthesis));
+            if (ss) {
+              ss.cancel();
+              var chunkText = chunkJobs[idx].text;
+              console.log('[CK Buddy TTS DEBUG] local TTS speaking: "' + chunkText.substring(0, 60) + '..."');
+              var u = new SpeechSynthesisUtterance(chunkText);
+              u.rate = 0.95;
+              var voices = ss.getVoices();
+              console.log('[CK Buddy TTS DEBUG] voices available:', voices.length);
+              for (var vi = 0; vi < voices.length; vi++) {
+                if (/female|zira|jenny|samantha/i.test(voices[vi].name) && /en/i.test(voices[vi].lang)) {
+                  u.voice = voices[vi];
+                  console.log('[CK Buddy TTS DEBUG] selected voice:', voices[vi].name);
+                  break;
+                }
+              }
+              // Highlight words on even-spread timing
+              var localWords = numWords;
+              var localStart = job.domStart;
+              var localDone = false;
+              u.onstart = function() { console.log('[CK Buddy TTS DEBUG] local TTS onstart fired for chunk ' + idx); };
+              u.onend = function() {
+                console.log('[CK Buddy TTS DEBUG] local TTS onend fired for chunk ' + idx);
+                localDone = true;
+                if (mySeq !== _ckrbSpeakSeq) return;
+                pauseAndConfirm(idx);
+              };
+              u.onerror = function(ev) {
+                console.warn('[CK Buddy TTS DEBUG] local TTS onerror for chunk ' + idx + ':', ev && ev.error);
+                localDone = true;
+                if (mySeq !== _ckrbSpeakSeq) return;
+                pauseAndConfirm(idx);
+              };
+              // Simple word highlight using onboundary
+              u.onboundary = function(ev) {
+                if (localDone || mySeq !== _ckrbSpeakSeq) return;
+                if (ev.name === 'word') {
+                  var charPos = ev.charIndex;
+                  var textSoFar = chunkJobs[idx].text.substring(0, charPos);
+                  var wordsSoFar = textSoFar.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+                  var domIdx = Math.min(wordsSoFar, localWords - 1);
+                  _ckrbHighlightWordByIndex(localStart + domIdx);
+                }
+              };
+              ss.speak(u);
+              _ckrbShowDebugBanner('Azure down — using local voice', '#f59e0b');
+              return;
+            }
+          } catch(localErr) {
+            console.warn('[CK Buddy TTS] local speechSynthesis fallback failed:', localErr);
+          }
           pauseAndConfirm(idx);
           return;
         }
@@ -2216,7 +2392,8 @@
 
   // Fallback path: plain REST synthesis + our silence/heuristic word timing.
   // Used only if the SDK global isn't present.
-  function _ckrbSpeakAzureRest(text, range, key, region, mySeq) {
+  function _ckrbSpeakAzureRest(text, range, key, region, mySeq, _429retry) {
+    _429retry = _429retry || 0;
     // REST fallback doesn't have SDK word boundary events, so it uses the
     // full-range word collection (no per-sentence isolation). This is the
     // degraded path — it's less precise but still works.
@@ -2237,8 +2414,34 @@
       },
       body: ssml
     })
-    .then(function(r) { if (!r.ok) throw new Error('Azure ' + r.status); return r.arrayBuffer(); })
+    .then(function(r) {
+      if (r.status === 429) {
+        console.warn('[CK Buddy TTS] AzureREST 429 — flagging Azure down, using local TTS');
+        _ckrbAzureDown = true;
+        // Fall back to local speechSynthesis
+        try {
+          var ss = window.speechSynthesis || (window.parent && window.parent.speechSynthesis);
+          if (ss) {
+            ss.cancel();
+            var u = new SpeechSynthesisUtterance(text);
+            u.rate = 0.95;
+            u.onend = function() {
+              if (mySeq !== _ckrbSpeakSeq) return;
+              _ckrbTTSSpeaking = false;
+              if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = '🔊 Read';
+              _ckrbCleanupTimer = setTimeout(function() { _ckrbCleanupTimer = null; _ckrbRemoveInPlaceHighlight(); }, 900);
+            };
+            ss.speak(u);
+            _ckrbShowDebugBanner('Azure 429 — using local voice', '#f59e0b');
+          }
+        } catch(_) {}
+        return null;
+      }
+      if (!r.ok) throw new Error('Azure ' + r.status);
+      return r.arrayBuffer();
+    })
     .then(function(buf) {
+      if (!buf) return; // v286: null means 429 retry is handling it
       if (mySeq !== _ckrbSpeakSeq) return;
       var blob = new Blob([buf], { type: 'audio/mpeg' });
       var url = URL.createObjectURL(blob);
@@ -2682,38 +2885,87 @@
   }
 
   function _ckrbToggleFlipbook() {
-    var topDoc;
-    try { topDoc = _ckrbTopDoc(); } catch(e) { topDoc = document; }
-    var existing = topDoc.getElementById('__ckrb_flipbook');
+    var existing = document.getElementById('__ckrb_flipbook');
     if (existing) { existing.remove(); return; }
     _ckrbShowFlipbook();
   }
 
   function _ckrbShowFlipbook() {
-    var topDoc;
-    try { topDoc = _ckrbTopDoc(); } catch(e) { topDoc = document; }
-    if (topDoc.getElementById('__ckrb_flipbook')) return;
+    if (document.getElementById('__ckrb_flipbook')) return;
     _ckrbLoadCards(function(cards) {
-      _ckrbBuildFlipbook(topDoc, cards);
+      _ckrbBuildFlipbook(document, cards);
     });
   }
 
-  function _ckrbBuildFlipbook(hostDoc, cards) {
+  // ── REVIEW STRATEGIES FLIPBOOK (v284) ──
+  var _CKRB_REVIEW_KEY = 'ckrb_review_cards';
+  var _CKRB_REVIEW_POS_KEY = 'ckrb_review_pos';
+
+  function _ckrbSaveReviewCards(cards) {
+    try { var o = {}; o[_CKRB_REVIEW_KEY] = cards; chrome.storage.local.set(o); } catch(e) {}
+  }
+
+  function _ckrbLoadReviewCards(cb) {
+    try {
+      chrome.storage.local.get([_CKRB_REVIEW_KEY], function(r) {
+        if (chrome.runtime.lastError) { cb([]); return; }
+        var cards = r && r[_CKRB_REVIEW_KEY];
+        cb(cards && cards.length ? cards : []);
+      });
+    } catch(e) { cb([]); }
+  }
+
+  function _ckrbToggleReviewFlipbook() {
+    var existing = document.getElementById('__ckrb_review_flipbook');
+    if (existing) { existing.remove(); return; }
+    _ckrbShowReviewFlipbook();
+  }
+
+  function _ckrbShowReviewFlipbook() {
+    if (document.getElementById('__ckrb_review_flipbook')) return;
+    _ckrbLoadReviewCards(function(cards) {
+      _ckrbBuildFlipbook(document, cards, {
+        id: '__ckrb_review_flipbook',
+        title: '📋 Review Strategies',
+        borderColor: '#10b981',
+        accentLight: '#34d399',
+        headerBg: '#064e3b',
+        headerTextColor: '#a7f3d0',
+        posKey: _CKRB_REVIEW_POS_KEY,
+        saveFn: _ckrbSaveReviewCards,
+        newLabel: '✨ New Review Note',
+        editLabel: '✏️ Edit Review Note'
+      });
+    });
+  }
+
+  function _ckrbBuildFlipbook(hostDoc, cards, cfg) {
+    cfg = cfg || {};
+    var fbId = cfg.id || '__ckrb_flipbook';
+    var fbTitle = cfg.title || '🃏 Strategy Cards';
+    var fbBorderColor = cfg.borderColor || '#6366f1';
+    var fbAccentLight = cfg.accentLight || '#818cf8';
+    var fbHeaderBg = cfg.headerBg || '#1e1b4b';
+    var fbHeaderText = cfg.headerTextColor || '#c7d2fe';
+    var fbPosKey = cfg.posKey || _CKRB_STRAT_POS_KEY;
+    var fbSaveFn = cfg.saveFn || _ckrbSaveCards;
+    var fbNewLabel = cfg.newLabel || '✨ New Strategy Card';
+    var fbEditLabel = cfg.editLabel || '✏️ Edit Strategy Card';
     var idx = 0;
     var root = hostDoc.createElement('div');
-    root.id = '__ckrb_flipbook';
+    root.id = fbId;
     root.setAttribute('data-ckrb-tts', 'true');
     root.style.cssText = 'position:fixed;top:40px;right:20px;z-index:2147483647;width:360px;' +
       'height:calc(100vh - 80px);display:flex;flex-direction:column;overflow:hidden;' +
-      'background:#1e293b;color:#e2e8f0;border:2px solid #6366f1;border-radius:12px;' +
+      'background:#1e293b;color:#e2e8f0;border:2px solid ' + fbBorderColor + ';border-radius:12px;' +
       'font-family:system-ui,-apple-system,sans-serif;box-shadow:0 8px 32px rgba(0,0,0,0.6);user-select:none;';
 
     // Restore saved position
     try {
-      chrome.storage.local.get([_CKRB_STRAT_POS_KEY], function(r) {
-        if (r && r[_CKRB_STRAT_POS_KEY]) {
-          root.style.left = r[_CKRB_STRAT_POS_KEY].left;
-          root.style.top = r[_CKRB_STRAT_POS_KEY].top;
+      chrome.storage.local.get([fbPosKey], function(r) {
+        if (r && r[fbPosKey]) {
+          root.style.left = r[fbPosKey].left;
+          root.style.top = r[fbPosKey].top;
           root.style.right = 'auto';
         }
       });
@@ -2722,8 +2974,8 @@
     // Header (drag handle)
     var header = hostDoc.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 14px;' +
-      'cursor:grab;border-bottom:1px solid #334155;border-radius:12px 12px 0 0;background:#1e1b4b;flex-shrink:0;';
-    header.innerHTML = '<span style="font-weight:700;font-size:14px;color:#c7d2fe;">🃏 Strategy Cards</span>';
+      'cursor:grab;border-bottom:1px solid #334155;border-radius:12px 12px 0 0;background:' + fbHeaderBg + ';flex-shrink:0;';
+    header.innerHTML = '<span style="font-weight:700;font-size:14px;color:' + fbHeaderText + ';">' + fbTitle + '</span>';
     var closeBtn = hostDoc.createElement('button');
     closeBtn.type = 'button';
     closeBtn.textContent = '✕';
@@ -2867,6 +3119,7 @@
     _fbSilent = false;
     // Speak first card — retry if voices aren't loaded yet
     function _fbSpeakFirst() {
+      if (!cards.length || !cards[idx]) return; // v286: no cards = nothing to speak
       var host = _fbGetSynth();
       if (!('speechSynthesis' in host)) return;
       var voices = host.speechSynthesis.getVoices();
@@ -2874,10 +3127,10 @@
       // Voices not loaded — wait for them
       host.speechSynthesis.addEventListener('voiceschanged', function vc() {
         host.speechSynthesis.removeEventListener('voiceschanged', vc);
-        _fbSpeak(cards[idx].text);
+        if (cards[idx]) _fbSpeak(cards[idx].text);
       });
       // Fallback timeout in case voiceschanged never fires
-      setTimeout(function() { _fbSpeak(cards[idx].text); }, 1500);
+      setTimeout(function() { if (cards[idx]) _fbSpeak(cards[idx].text); }, 1500);
     }
     setTimeout(_fbSpeakFirst, 300);
 
@@ -2887,7 +3140,7 @@
 
     // Keyboard nav when flipbook is visible
     function keyNav(e) {
-      if (!hostDoc.getElementById('__ckrb_flipbook')) { hostDoc.removeEventListener('keydown', keyNav, true); return; }
+      if (!hostDoc.getElementById(fbId)) { hostDoc.removeEventListener('keydown', keyNav, true); return; }
       if (e.key === 'ArrowLeft') { e.preventDefault(); if (idx > 0) { idx--; render(); } }
       if (e.key === 'ArrowRight') { e.preventDefault(); if (idx < cards.length - 1) { idx++; render(); } }
       if (e.key === 'Escape') { _fbStopSpeak(); root.remove(); }
@@ -2907,7 +3160,7 @@
       var formWrap = hostDoc.createElement('div');
       formWrap.style.cssText = 'padding:4px 0;display:flex;flex-direction:column;align-items:center;gap:10px;flex:1;justify-content:center;';
       var formTitle = hostDoc.createElement('div');
-      formTitle.textContent = '✨ New Strategy Card';
+      formTitle.textContent = fbNewLabel;
       formTitle.style.cssText = 'font-size:16px;font-weight:700;color:#c7d2fe;';
       var inp = hostDoc.createElement('textarea');
       inp.placeholder = 'Type your strategy...';
@@ -2931,7 +3184,7 @@
       }
       okBtn.addEventListener('click', function() {
         var txt = inp.value.trim();
-        if (txt) { cards.push({id:'u_'+Date.now(), text:txt, imageDataUrl:null}); _ckrbSaveCards(cards); idx = cards.length - 1; }
+        if (txt) { cards.push({id:'u_'+Date.now(), text:txt, imageDataUrl:null}); fbSaveFn(cards); idx = cards.length - 1; }
         closeForm();
       });
       cancelBtn.addEventListener('click', closeForm);
@@ -2950,7 +3203,7 @@
       var formWrap = hostDoc.createElement('div');
       formWrap.style.cssText = 'padding:4px 0;display:flex;flex-direction:column;align-items:center;gap:10px;flex:1;justify-content:center;';
       var formTitle = hostDoc.createElement('div');
-      formTitle.textContent = '✏️ Edit Strategy Card';
+      formTitle.textContent = fbEditLabel;
       formTitle.style.cssText = 'font-size:16px;font-weight:700;color:#fde68a;';
       var inp = hostDoc.createElement('textarea');
       inp.value = cards[idx].text;
@@ -2975,7 +3228,7 @@
       }
       okBtn.addEventListener('click', function() {
         var txt = inp.value.trim();
-        if (txt) { cards[idx].text = txt; _ckrbSaveCards(cards); }
+        if (txt) { cards[idx].text = txt; fbSaveFn(cards); }
         closeForm();
       });
       cancelBtn.addEventListener('click', closeForm);
@@ -2987,7 +3240,7 @@
       if (!cards.length) return;
       _fbStopSpeak();
       cards.splice(idx, 1);
-      _ckrbSaveCards(cards);
+      fbSaveFn(cards);
       if (idx >= cards.length) idx = cards.length - 1;
       render();
     });
@@ -3008,7 +3261,7 @@
           var canvas = hostDoc.createElement('canvas'); canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
           cards[idx].imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          _ckrbSaveCards(cards);
+          fbSaveFn(cards);
           render();
         };
         img.src = ev.target.result;
@@ -3034,7 +3287,7 @@
               var canvas = hostDoc.createElement('canvas'); canvas.width = w; canvas.height = h;
               canvas.getContext('2d').drawImage(img, 0, 0, w, h);
               cards[idx].imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-              _ckrbSaveCards(cards);
+              fbSaveFn(cards);
               render();
             };
             img.src = ev.target.result;
@@ -3075,7 +3328,7 @@
           var canvas = hostDoc.createElement('canvas'); canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
           cards[idx].imageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          _ckrbSaveCards(cards);
+          fbSaveFn(cards);
           render();
         };
         img.src = ev.target.result;
@@ -3103,7 +3356,7 @@
         _fbDrag = false; header.style.cursor = 'grab';
         try {
           var pos = { left: root.style.left, top: root.style.top };
-          var o = {}; o[_CKRB_STRAT_POS_KEY] = pos;
+          var o = {}; o[fbPosKey] = pos;
           chrome.storage.local.set(o);
         } catch(e) {}
       }
@@ -3113,16 +3366,14 @@
   }
 
   // ── Floating toggle button on qbank sites ──
+  // v283: append to CURRENT document, not topDoc — top frame may be invisible wrapper
   function _ckrbCreateFlipbookToggle() {
-    var topDoc;
-    try { topDoc = _ckrbTopDoc(); } catch(e) { topDoc = document; }
-    if (topDoc.getElementById('__ckrb_flipbook_toggle')) return;
-    // Only top-accessible frame
-    try { if (window.parent && window.parent !== window && window.parent.document) return; } catch(e) {}
+    if (document.getElementById('__ckrb_flipbook_toggle')) return;
     var host = '';
     try { host = location.hostname; } catch(e) {}
     if (!/uworld\.com|amboss\.com|starttest\.com|nbme\.org|ccscases\.com/i.test(host)) return;
-    var btn = topDoc.createElement('button');
+    if (!document.body) return; // body not ready yet
+    var btn = document.createElement('button');
     btn.id = '__ckrb_flipbook_toggle';
     btn.type = 'button';
     btn.innerHTML = '🃏';
@@ -3131,10 +3382,40 @@
     btn.style.cssText = 'position:fixed;bottom:70px;right:20px;z-index:2147483647;width:42px;height:42px;' +
       'border-radius:50%;background:#6366f1;color:#fff;border:2px solid #818cf8;font-size:20px;cursor:pointer;' +
       'box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;';
-    btn.addEventListener('click', function() { _ckrbToggleFlipbook(); });
-    (topDoc.body || topDoc.documentElement).appendChild(btn);
+    btn.addEventListener('click', function() {
+      try { _ckrbToggleFlipbook(); } catch(e) { console.error('[CK Buddy] Flipbook toggle error:', e); }
+    });
+    document.body.appendChild(btn);
+    console.log('[CK Buddy] Flipbook toggle button created on', host, 'frame:', window === window.top ? 'TOP' : 'CHILD');
   }
-  setTimeout(_ckrbCreateFlipbookToggle, 3000);
+  setTimeout(_ckrbCreateFlipbookToggle, 2000);
+  setInterval(_ckrbCreateFlipbookToggle, 5000);
+
+  // ── Second floating button: Review Strategies ──
+  // v284: same flipbook, second entry point for reviewing
+  function _ckrbCreateReviewToggle() {
+    if (document.getElementById('__ckrb_review_toggle')) return;
+    var host = '';
+    try { host = location.hostname; } catch(e) {}
+    if (!/uworld\.com|amboss\.com|starttest\.com|nbme\.org|ccscases\.com/i.test(host)) return;
+    if (!document.body) return;
+    var btn = document.createElement('button');
+    btn.id = '__ckrb_review_toggle';
+    btn.type = 'button';
+    btn.innerHTML = '📋';
+    btn.title = 'Review Strategies';
+    btn.setAttribute('data-ckrb-tts', 'true');
+    btn.style.cssText = 'position:fixed;bottom:120px;right:20px;z-index:2147483647;width:42px;height:42px;' +
+      'border-radius:50%;background:#10b981;color:#fff;border:2px solid #34d399;font-size:20px;cursor:pointer;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;';
+    btn.addEventListener('click', function() {
+      try { _ckrbToggleReviewFlipbook(); } catch(e) { console.error('[CK Buddy] Review toggle error:', e); }
+    });
+    document.body.appendChild(btn);
+    console.log('[CK Buddy] Review toggle button created on', host);
+  }
+  setTimeout(_ckrbCreateReviewToggle, 2000);
+  setInterval(_ckrbCreateReviewToggle, 5000);
 
   // ── Auto-show on UWorld Create Test page ──
   var _ckrbFlipbookAutoShown = false;

@@ -243,8 +243,18 @@ Rules:
     parsed._type = 'incorrect';
     return parsed;
   } catch(e) {
-    console.error('[CKRB] processIncorrect parse failed:', e.message, raw ? raw.slice(0,200) : 'empty');
-    return { _type: 'incorrect', userAnswer: safeUA, correctAnswer: safeCA, likelyMisconception: 'Review explanation.', triviaQuestions: [] };
+    console.error('[CKRB] processIncorrect parse failed:', e.message, 'raw response:', raw ? raw.slice(0,500) : 'empty');
+    // v292: Generate fallback trivia instead of returning empty array
+    // (empty array causes "No trivia questions generated" on single-question scans)
+    const fallbackTrivia = [{
+      vignetteQuote: cleanText.slice(0, 80),
+      question: "Based on the clinical clues in this vignette, what is the most likely diagnosis?",
+      choices: cleanChoices.length >= 4 ? cleanChoices.slice(0,4).map(c => c.replace(/^[A-H]\.\s*/, '')) : ["Option A","Option B","Option C","Option D"],
+      correctIndex: 0,
+      explanation: "Review the explanation for this question.",
+      difficulty: "medium"
+    }];
+    return { _type: 'incorrect', userAnswer: safeUA, correctAnswer: safeCA, likelyMisconception: 'Review explanation.', triviaQuestions: fallbackTrivia };
   }
 }
 
@@ -324,8 +334,16 @@ Rules: vignetteQuote must be verbatim from the stem. zczc quotes must be plain s
     parsed._type = 'marked';
     return parsed;
   } catch(e) {
-    console.error('[CKRB] processMarked parse failed:', e.message, raw ? raw.slice(0,200) : 'empty');
-    return { _type: 'marked', userAnswer: safeCA, correctAnswer: safeCA, likelyMisconception: 'Marked for review.', triviaQuestions: [] };
+    console.error('[CKRB] processMarked parse failed:', e.message, 'raw:', raw ? raw.slice(0,500) : 'empty');
+    // v292: Fallback trivia
+    return { _type: 'marked', userAnswer: safeCA, correctAnswer: safeCA, likelyMisconception: 'Marked for review.', triviaQuestions: [{
+      vignetteQuote: cleanText.slice(0, 80),
+      question: "What was the key concept you were unsure about in this question?",
+      choices: cleanChoices.length >= 4 ? cleanChoices.slice(0,4).map(c => c.replace(/^[A-H]\.\s*/, '')) : ["Option A","Option B","Option C","Option D"],
+      correctIndex: 0,
+      explanation: "Review the explanation for this flagged question.",
+      difficulty: "medium"
+    }] };
   }
 }
 
@@ -374,8 +392,17 @@ Generate 1 question only. zczc quotes must be plain strings only.${imagNote2}`;
     const parsed = JSON.parse(clean);
     parsed._type = 'correct';
     return parsed;
-  } catch {
-    return { _type: 'correct', userAnswer: safeCA, correctAnswer: safeCA, keyFact: '', triviaQuestions: [] };
+  } catch(e) {
+    console.error('[CKRB] processCorrect parse failed:', e.message, 'raw:', raw ? raw.slice(0,500) : 'empty');
+    // v292: Fallback trivia so single-question scans don't return empty
+    return { _type: 'correct', userAnswer: safeCA, correctAnswer: safeCA, keyFact: '', triviaQuestions: [{
+      vignetteQuote: cleanText.slice(0, 80),
+      question: "What key concept does this question reinforce?",
+      choices: ["Review the explanation", "Option B", "Option C", "Option D"],
+      correctIndex: 0,
+      explanation: "Review the question explanation for reinforcement.",
+      difficulty: "easy"
+    }] };
   }
 }
 
@@ -446,8 +473,20 @@ async function processBatch(questions) {
       }
       enriched.push({ ...q, analysis });
     } catch (e) {
-      console.error('[CKRB] API error on Q' + done, e.message);
-      enriched.push({ ...q, analysis: { _type: 'error', error: e.message, triviaQuestions: [] } });
+      console.error('[CKRB] API error on Q' + done, ':', e.message);
+      // v292: Generate fallback trivia from the raw question data so the quiz isn't empty
+      const stemSnippet = (q.questionText || '').slice(0, 80);
+      const fbChoices = (q.choices || []).length >= 4
+        ? q.choices.slice(0,4).map(c => c.replace(/^[A-H]\.\s*/, ''))
+        : ["Option A","Option B","Option C","Option D"];
+      enriched.push({ ...q, analysis: { _type: 'error', error: e.message, triviaQuestions: [{
+        vignetteQuote: stemSnippet,
+        question: "Review: what is the key concept tested by this question?",
+        choices: fbChoices,
+        correctIndex: 0,
+        explanation: "API error occurred. Review the original explanation. Error: " + e.message.slice(0, 80),
+        difficulty: "medium"
+      }] } });
       // Only abort on first question AND it's not a timeout (timeout = skip and continue)
       if (done === 0 && !e.message.includes('timeout')) {
         stopKeepalive();
