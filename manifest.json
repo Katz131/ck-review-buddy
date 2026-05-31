@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "🧠 CK Buddy v296 (table headers from td not th)",
-  "version": "3.960",
+  "name": "🧠 DRK Buddy v432 (update)",
+  "version": "4.1320",
   "description": "Scrapes NBME, AMBOSS, UWorld & CCS Cases Q-banks, analyzes wrong answers, quizzes you on missed concepts.",
   "permissions": [
     "activeTab",

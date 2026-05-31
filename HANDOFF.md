@@ -18,9 +18,9 @@
 
 ## What CK Buddy Is
 
-A Chrome MV3 extension for USMLE Step 2 CK review. It scrapes question banks (NBME, AMBOSS, UWorld, CCS Cases), sends wrong answers to Claude API for analysis, and quizzes the user on missed concepts via a popup. It also has text-to-speech for reading questions/explanations aloud with word-by-word highlighting, and a **Strategy Cards flipbook** for test-taking strategies.
+A Chrome MV3 extension for USMLE Step 2 CK review. It scrapes question banks (NBME, AMBOSS, UWorld, CCS Cases), sends wrong answers to Claude API for analysis, and quizzes the user on missed concepts via a popup. It also has text-to-speech for reading questions/explanations aloud with word-by-word highlighting, a **Strategy Cards flipbook** for test-taking strategies, a **cross-extension bridge to Todo of the Loom** for distraction penalties/bonuses, and **wrong-choice highlighting** on Q-bank explanation pages.
 
-**Current Version:** v275
+**Current Version:** v334
 
 ---
 
@@ -150,6 +150,17 @@ The extension uses 6 content script entries in `manifest.json`:
 - `NAV_TO_QUESTION` — Directly to NBME content script in some code paths
 - `ABORT_SCRAPE` — To content scripts to stop scraping
 - `TOGGLE_STRATEGY_CARDS` — To content.js to open/close flipbook
+- `HIGHLIGHT_WRONG_CHOICE` — To content.js (v325, superseded by executeScript in v332+)
+
+### Popup.js sends (cross-extension to Todo of the Loom):
+- `CKRB_BLOCK_STARTED` — When quiz block begins
+- `CKRB_QUESTION_ANSWERED` — On each answer submission
+- `CKRB_IDLE_WARNING` — When 120s pass without answering
+- `CKRB_BLOCK_COMPLETED` — When results screen shows
+- `CKRB_PING` — Every 10s to check bridge status
+
+### Content.js handles (v325, partially superseded):
+- `HIGHLIGHT_WRONG_CHOICE` — Legacy handler still present but popup.js v332+ uses `chrome.scripting.executeScript` directly instead
 
 ---
 
@@ -359,41 +370,107 @@ Two completely separate TTS systems — DO NOT mix them.
 
 ## Stale Content
 
-- **content.js line 1:** Comment says `v176` but actual version is v275. The line 1 comment is NOT updated by `bump.js` — only `CKRB_VERSION` on line 5 is bumped. Low priority cosmetic fix.
+- **content.js line 1:** Comment says `v176` but actual version is v326. The line 1 comment is NOT updated by `bump.js` — only `CKRB_VERSION` on line 5 is bumped. Low priority cosmetic fix.
 
 ---
 
-## Changes This Session (v269→v275)
+## Changes History
 
-### v269 (from previous session)
-- Strategy Cards flipbook feature complete
-- Add card UI disambiguation
+### v317–v319: TTS Glow Outline
+- Added `.tts-reading` CSS class: orange outline + box-shadow on quiz text boxes while TTS is reading
+- `_explSpeakChunked(text, skipConfirm, glowElId)` takes 3rd param for glow target element ID
+- Quote and question TTS now glow separately: quote glows `vignette-quote-box`, question glows `quiz-question-text`
+- `_explStopAll()` removes `.tts-reading` from all tracked glow elements
 
-### v270
-- Added DOM export mechanism (`ckrb-export-cards` event) for extracting card data from content script
+### v320: Cross-Extension Bridge to Todo of the Loom
+- `_sendToLoom(data)`: Fire-and-forget wrapper for `chrome.runtime.sendMessage` to Loom extension ID
+- Sends `CKRB_BLOCK_STARTED` when quiz block begins (with `blockSize`, `site`, `timestamp`)
+- Sends `CKRB_QUESTION_ANSWERED` on each answer (with `questionIndex`, `correct`, `elapsedMs`)
+- Sends `CKRB_BLOCK_COMPLETED` when results screen shows (with `totalQuestions`, `correctCount`, `totalMs`)
+- `_startLoomIdleChecker()` / `_stopLoomIdleChecker()`: 45s setInterval, fires `CKRB_IDLE_WARNING` after 120s idle
+- `_loomDetectSite(questions)`: Reads `parentQ.source` to detect 'uworld'/'amboss'/'nbme'
+- Handles both standard and Amboss quiz paths
+- See `CROSS-EXTENSION-BRIDGE.md` for full protocol spec
 
-### v271
-- Added ✏️ Edit button for editing current card text (amber button, shows pre-filled form)
+### v321–v322: Live Bridge Status Indicator
+- `_pingLoom()`: Pings Todo of the Loom every 10s via `CKRB_PING`, updates status indicators
+- `#loom-status` text indicator on home screen header
+- `.loom-dot` green/red/gray circle indicators on both quiz screen headers
+- CSS classes: `.loom-on` (green glow), `.loom-off` (red glow), `.loom-unknown` (gray)
 
-### v272
-- Shared AudioContext for button sounds (reuses one instead of creating per hover/click)
+### v323–v324: Per-Question Timer
+- `_startQTimer(elId)` / `_stopQTimer()`: Per-question timer counting up from 0:00
+- Color thresholds: yellow at 45s, red at 90s (standard questions)
+- Timer does NOT stop on answer — only resets when next question renders
+- `#q-timer` and `#amboss-q-timer` elements in quiz headers
+- CSS: `.q-timer`, `.q-timer-yellow`, `.q-timer-red` with monospace font
 
-### v273
-- AudioContext created eagerly on flipbook open + unlocked on first user interaction
+### v325: Wrong Choice Highlighting + Timer Warning
+- **Wrong choice highlighting on Q-bank pages:**
+  - popup.js: `_highlightWrongChoiceOnPage(letter)` sends `HIGHLIGHT_WRONG_CHOICE` to active tabs
+  - Extracts choice letter from `analysis.userAnswer` (e.g., "F. Transvaginal ultrasound" → "F")
+  - content.js: `_ckrbHighlightWrongChoice(letter)` uses TreeWalker to find text nodes matching `(Choice F)`, `(Choices A, B, and F)`, etc.
+  - Wraps matches in `<span class="ckrb-wrong-choice-hl">` with pulsing orange glow animation
+  - Scrolls to first match on the Q-bank page
+  - Removes previous highlights before applying new ones
+- **Timer warning at 90s:**
+  - Applies `q-timer-pulse` CSS animation (3 pulses, scale 1→1.15→1)
+  - Plays descending two-tone beep (440Hz→330Hz square wave, 0.08 gain)
+  - Fires once per question (guard flag `_qTimerWarnFired`)
 
-### v274
-- Card counter font bumped to 15px, min-width 70px, nav gap 18px (easier to read)
-- `_ckrbLoadCards` NEVER writes defaults to storage (prevents image loss on reload)
+### v326: Adaptive Timer Thresholds
+- 3-part deep-review questions (incorrect/marked/unknown) get longer thresholds: yellow at 60s, red+warning at 120s
+- Single-part correct-answer questions keep original 45s/90s thresholds
+- `_startQTimer(elId, isMultiPart)` now accepts 2nd param
 
-### v275
-- `TOGGLE_STRATEGY_CARDS` message handler: top-frame-only guard prevents multi-frame race condition where one frame creates flipbook and another removes it
-- Fixes popup Strategy Cards button not working on UWorld (multi-iframe pages)
+### v329: Running Stats Tooltip on Quiz Timer
+- `_qStats` object tracks: totalQs, fastQs, okQs, slowQs, idleCost, totalTimeSec
+- Timer tooltip updates every tick: shows running avg per question, fast/ok/slow counts, projected Loom bonus/penalty
+- Fast threshold: <45s, OK threshold: <90s, Slow threshold: ≥90s
+- `_qStats.reset()` called at block start
+
+### v330–v331: Wrong Choice Highlight Fixes
+- Added `HIGHLIGHT_WRONG_CHOICE` handler to background.js (was missing — messages silently dropped)
+- Fixed CSS class mismatch: content.js defined `.ckrb-wrong-choice-hl` but code used `.ckrb-wrong-para-hl`
+- Added 4s delay before highlight to wait for UWorld SPA navigation to load new question
+
+### v332–v333: executeScript Highlight (Replaces Content Script Approach)
+- **Problem:** UWorld SPA navigation reloads content.js after page change, wiping any highlights applied by the content script
+- **Solution:** popup.js now uses `chrome.scripting.executeScript` with `world: 'MAIN'` to inject highlight code directly into the page's main world
+- `_highlightWrongChoiceOnPage(letter)` in popup.js (~line 2090):
+  - Queries all tabs matching qbank URLs (uworld, amboss, starttest, nbme)
+  - Injects CSS for `.ckrb-wrong-para-hl` with pulsing orange animation + 3px solid border
+  - Uses TreeWalker to find text nodes matching regex `\(Choices?\s[^)]*\bX\b` (handles all UWorld formats)
+  - Walks up to block-level parent (<p>, <div>, <li>, <td>, <section>, <article>), adds glow class
+  - Scrolls highlighted paragraph into view with `behavior: 'smooth'`
+  - Retries up to 10 times at 1s intervals if text not found (UWorld lazy-loads explanation content)
+- Content script `_ckrbHighlightWrongChoice(letter)` still exists but is no longer the primary mechanism
+- `HIGHLIGHT_WRONG_CHOICE` handler in background.js also exists but is redundant
+
+### v334: Regex Update for UWorld Choice Formats
+- Updated highlight regex from `\(Choice\s+X\)` to `\(Choices?\s[^)]*\bX\b`
+- Handles all UWorld answer choice reference formats:
+  - `(Choice A)` — single choice
+  - `(Choices A and B)` — two choices
+  - `(Choices A, B, and C)` — three+ choices
+  - `(Choices E, F, and G)` — any letter combination
+- Confirmed working across multiple UWorld questions
+
+### Loom-side changes (Todo of the Loom v3.23.407)
+- **Fixed:** `CKRB_BLOCK_COMPLETED` handler now ALWAYS fires visible feedback regardless of answer speed
+- Previously: bonus/celebration/notification only triggered if avg answer time <90s; slower = silent
+- Now: always queues a pending reward entry (type `'bonus'` or `'complete'`), always shows OS notification, always opens Loom popup.html tab
+- Pop-out `ckrb-alert.html` window still only appears when actual dollar bonus earned (avg <45s or <90s)
+- `showCkBuddyCelebration()` in app.js updated to handle new `type: 'complete'` entries (purple text, checkmark icon)
+- **manifest.json fix:** `externally_connectable.ids` was truncated in a previous session; restored with full CK Buddy extension ID
 
 ---
 
 ## What Still Needs Doing
 
 1. **Fix Q1→Q20 scrape jump bug** — see NEXT TASK section above
-2. **Verify popup chunked TTS works end-to-end** — popup TTS was written but never fully confirmed
-3. **Test Strategy Cards on all qbank sites** — auto-show on UWorld createtest and AMBOSS customsession confirmed working; other sites may need testing
-4. **Strategy card defaults not persisting for new users** — since `_ckrbLoadCards` never saves defaults, brand new users will see defaults but they won't be in storage until they make a change. This is intentional (protects images) but worth noting.
+2. **Test Strategy Cards on all qbank sites** — auto-show on UWorld createtest and AMBOSS customsession confirmed working; other sites may need testing
+3. **Strategy card defaults not persisting for new users** — since `_ckrbLoadCards` never saves defaults, brand new users will see defaults but they won't be in storage until they make a change. This is intentional (protects images) but worth noting.
+4. **Verify Loom bridge celebration fires in browser** — code changes made in Loom v3.23.407 to always open popup + show celebration on block complete. Needs live test: finish a quiz in CK Buddy with bridge toggle ON, confirm Loom popup opens and celebration overlay appears.
+5. **Floating strategy cards icon on qbank pages** — in progress (task #30)
+6. **Clean up redundant highlight code** — background.js `HIGHLIGHT_WRONG_CHOICE` handler and content.js `_ckrbHighlightWrongChoice` are both superseded by popup.js `_highlightWrongChoiceOnPage` using executeScript. Could be removed to reduce confusion.

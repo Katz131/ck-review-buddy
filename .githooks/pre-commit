@@ -1,0 +1,21 @@
+#!/bin/bash
+# Pre-commit hook: Block commits if version numbers don't match across files
+# Install: git config core.hooksPath .githooks
+
+MANIFEST_VER=$(grep -oP '"name":\s*"CK Review Buddy v\K\d+' manifest.json)
+POPUP_VER=$(grep -oP "CKRB_VERSION\s*=\s*'v\K\d+" popup.js)
+CONTENT_VER=$(grep -oP "CKRB_VERSION\s*=\s*'v\K\d+" content.js)
+
+if [ "$MANIFEST_VER" != "$POPUP_VER" ] || [ "$MANIFEST_VER" != "$CONTENT_VER" ]; then
+    echo ""
+    echo "!!! COMMIT BLOCKED — VERSION MISMATCH !!!"
+    echo "  manifest.json: v$MANIFEST_VER"
+    echo "  popup.js:      v$POPUP_VER"
+    echo "  content.js:    v$CONTENT_VER"
+    echo ""
+    echo "Run: node bump.js && node verify-versions.js"
+    echo ""
+    exit 1
+fi
+
+echo "Pre-commit: versions match (v$MANIFEST_VER) ✓"

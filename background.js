@@ -111,6 +111,43 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 });
 
 /* ─────────────────────────────────────────────
+   v378: QUIZ READY NOTIFICATION — fires from background
+   so it works even when popup is closed
+───────────────────────────────────────────── */
+var _ckrbReadyNotified = false; // prevent double-firing
+chrome.storage.onChanged.addListener(function(changes, area) {
+  if (area !== 'local' || !changes.ckrb_status) return;
+  var newVal = changes.ckrb_status.newValue;
+  if (!newVal || newVal.state !== 'ready') {
+    _ckrbReadyNotified = false; // reset when state leaves 'ready'
+    return;
+  }
+  if (_ckrbReadyNotified) return;
+  _ckrbReadyNotified = true;
+  console.log('[CK Buddy BG] Quiz ready! Firing notification.');
+  // Browser notification — works even when popup is closed
+  try {
+    chrome.notifications.create('ckrb-ready-' + Date.now(), {
+      type: 'basic',
+      iconUrl: 'icon128.png',
+      title: 'DRK Buddy — Quiz Ready!',
+      message: 'Your review questions are generated. Click to start!',
+      priority: 2,
+      requireInteraction: true
+    });
+  } catch (_) {}
+  // Also open/focus the popup window so user can start
+  try {
+    chrome.storage.local.get([CKRB_POPOUT_WINDOW_KEY], function(stored) {
+      var existingId = stored[CKRB_POPOUT_WINDOW_KEY];
+      if (existingId) {
+        chrome.windows.update(existingId, { focused: true }).catch(function() {});
+      }
+    });
+  } catch (_) {}
+});
+
+/* ─────────────────────────────────────────────
    HELPER: Get API key from storage
 ───────────────────────────────────────────── */
 async function getApiKey() {
@@ -139,7 +176,7 @@ async function callClaude(systemPrompt, userPrompt, apiKey, _retry) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 2500,
+        max_tokens: 4000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }]
       })
@@ -228,7 +265,17 @@ Rules:
   }
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    const clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    let clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    // v298: Sanitize control characters INSIDE JSON string values only
+    // (structural whitespace between keys/values must stay intact)
+    clean = clean.replace(/"(?:[^"\\]|\\.)*"/g, function(str) {
+      return str.replace(/[\x00-\x1F\x7F]/g, function(ch) {
+        if (ch === '\n') return '\\n';
+        if (ch === '\r') return '\\r';
+        if (ch === '\t') return '\\t';
+        return '';
+      });
+    });
     const parsed = JSON.parse(clean);
     if (!parsed.triviaQuestions || parsed.triviaQuestions.length === 0) {
       parsed.triviaQuestions = [{
@@ -241,17 +288,33 @@ Rules:
       }];
     }
     parsed._type = 'incorrect';
+    // v390: FORCE scraper-sourced answers — AI sometimes changes these
+    parsed.userAnswer = safeUA;
+    parsed.correctAnswer = safeCA;
+    console.log('[CKRB] processIncorrect: forced userAnswer="' + safeUA.substring(0, 40) + '" correctAnswer="' + safeCA.substring(0, 40) + '"');
     return parsed;
   } catch(e) {
     console.error('[CKRB] processIncorrect parse failed:', e.message, 'raw response:', raw ? raw.slice(0,500) : 'empty');
+    // v296: Save failure details to storage so we can debug even after SW restarts
+    chrome.storage.local.get(['ckrb_api_failures'], r => {
+      const fails = r.ckrb_api_failures || [];
+      fails.push({
+        time: new Date().toISOString(),
+        fn: 'processIncorrect',
+        error: e.message,
+        rawSnippet: raw ? raw.slice(0, 300) : 'empty',
+        stem: cleanText.slice(0, 80),
+        choiceCount: cleanChoices.length
+      });
+      chrome.storage.local.set({ ckrb_api_failures: fails.slice(-20) }); // keep last 20
+    });
     // v292: Generate fallback trivia instead of returning empty array
-    // (empty array causes "No trivia questions generated" on single-question scans)
     const fallbackTrivia = [{
       vignetteQuote: cleanText.slice(0, 80),
       question: "Based on the clinical clues in this vignette, what is the most likely diagnosis?",
       choices: cleanChoices.length >= 4 ? cleanChoices.slice(0,4).map(c => c.replace(/^[A-H]\.\s*/, '')) : ["Option A","Option B","Option C","Option D"],
       correctIndex: 0,
-      explanation: "Review the explanation for this question.",
+      explanation: "AI parse error: " + e.message.slice(0, 100) + " | Raw: " + (raw ? raw.slice(0, 150) : 'empty'),
       difficulty: "medium"
     }];
     return { _type: 'incorrect', userAnswer: safeUA, correctAnswer: safeCA, likelyMisconception: 'Review explanation.', triviaQuestions: fallbackTrivia };
@@ -319,7 +382,17 @@ Rules: vignetteQuote must be verbatim from the stem. zczc quotes must be plain s
   }
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    const clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    let clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    // v298: Sanitize control characters INSIDE JSON string values only
+    // (structural whitespace between keys/values must stay intact)
+    clean = clean.replace(/"(?:[^"\\]|\\.)*"/g, function(str) {
+      return str.replace(/[\x00-\x1F\x7F]/g, function(ch) {
+        if (ch === '\n') return '\\n';
+        if (ch === '\r') return '\\r';
+        if (ch === '\t') return '\\t';
+        return '';
+      });
+    });
     const parsed = JSON.parse(clean);
     if (!parsed.triviaQuestions || parsed.triviaQuestions.length === 0) {
       parsed.triviaQuestions = [{
@@ -388,7 +461,17 @@ Generate 1 question only. zczc quotes must be plain strings only.${imagNote2}`;
   const raw = await callClaude(systemPrompt, userPrompt, apiKey);
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    const clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    let clean = jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim();
+    // v298: Sanitize control characters INSIDE JSON string values only
+    // (structural whitespace between keys/values must stay intact)
+    clean = clean.replace(/"(?:[^"\\]|\\.)*"/g, function(str) {
+      return str.replace(/[\x00-\x1F\x7F]/g, function(ch) {
+        if (ch === '\n') return '\\n';
+        if (ch === '\r') return '\\r';
+        if (ch === '\t') return '\\t';
+        return '';
+      });
+    });
     const parsed = JSON.parse(clean);
     parsed._type = 'correct';
     return parsed;
@@ -743,6 +826,88 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, error: String(e) });
     }
     return true; // async
+  }
+  // v332: Inject highlight directly into qbank page via executeScript (bypasses content.js reload issues)
+  if (msg.type === 'HIGHLIGHT_WRONG_CHOICE' && msg.letter) {
+    const qbankUrls = ['uworld.com', 'amboss.com', 'starttest.com', 'nbme.org'];
+    chrome.tabs.query({}, (allTabs) => {
+      const targets = allTabs.filter(t => t.url && qbankUrls.some(u => t.url.includes(u)));
+      console.log('[CK Buddy BG] HIGHLIGHT_WRONG_CHOICE letter=' + msg.letter + ' → ' + targets.length + ' qbank tab(s)');
+      targets.forEach(t => {
+        // Inject CSS + highlight function + retry logic directly into the page
+        chrome.scripting.executeScript({
+          target: { tabId: t.id },
+          world: 'MAIN',
+          func: function(letter) {
+            // Inject CSS if not already there
+            if (!document.getElementById('ckrb-para-hl-css')) {
+              var s = document.createElement('style');
+              s.id = 'ckrb-para-hl-css';
+              s.textContent =
+                '@keyframes ckrb-para-pulse {' +
+                '  0%, 100% { background: rgba(249,115,22,0.08); border-left-color: rgba(249,115,22,0.6); }' +
+                '  50% { background: rgba(249,115,22,0.18); border-left-color: rgba(249,115,22,1); }' +
+                '}' +
+                '.ckrb-wrong-para-hl {' +
+                '  background: rgba(249,115,22,0.12) !important;' +
+                '  border-left: 4px solid #f97316 !important;' +
+                '  border-radius: 6px !important;' +
+                '  padding: 8px 12px !important;' +
+                '  margin: 4px 0 !important;' +
+                '  animation: ckrb-para-pulse 2s ease-in-out infinite !important;' +
+                '  scroll-margin-top: 120px !important;' +
+                '}';
+              (document.head || document.documentElement).appendChild(s);
+            }
+            // Highlight function with retry
+            function doHighlight(letter, attempt) {
+              // Remove old highlights
+              document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) {
+                el.classList.remove('ckrb-wrong-para-hl');
+              });
+              var pat = new RegExp('\\(Choice\\s+' + letter + '\\)', 'i');
+              var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+              var node;
+              while (node = walker.nextNode()) {
+                var tag = node.parentElement ? node.parentElement.tagName : '';
+                if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') continue;
+                if (pat.test(node.textContent)) {
+                  var block = node.parentElement;
+                  while (block && block !== document.body) {
+                    var display = window.getComputedStyle(block).display;
+                    if (display === 'block' || display === 'list-item' || display === 'table-cell' || display === 'flex') break;
+                    block = block.parentElement;
+                  }
+                  if (block && block !== document.body) {
+                    block.classList.add('ckrb-wrong-para-hl');
+                    setTimeout(function() {
+                      block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 300);
+                    console.log('[CK Buddy] Highlighted Choice ' + letter + ' paragraph (attempt ' + attempt + ')');
+                    return true;
+                  }
+                }
+              }
+              console.log('[CK Buddy] Choice ' + letter + ' not found (attempt ' + attempt + ')');
+              return false;
+            }
+            // Try immediately, then retry up to 8 times over 8 seconds
+            if (!doHighlight(letter, 1)) {
+              var retries = 0;
+              var iv = setInterval(function() {
+                retries++;
+                if (doHighlight(letter, retries + 1) || retries >= 8) {
+                  clearInterval(iv);
+                }
+              }, 1000);
+            }
+          },
+          args: [msg.letter]
+        }).catch(function(e) { console.warn('[CK Buddy BG] executeScript failed:', e); });
+      });
+    });
+    sendResponse({ ok: true });
+    return true;
   }
   return true;
 });

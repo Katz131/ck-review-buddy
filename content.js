@@ -2,8 +2,61 @@
 
 (function () {
   // VERSION: must match popup.js AND manifest.json -- run `node bump.js` to update all 3
-  var CKRB_VERSION = '296';
+  var CKRB_VERSION = '432';
   try { console.log('[CK Buddy v' + CKRB_VERSION + '] content.js loaded on', location.hostname); } catch(_) {}
+  // v306: Audio + 3D button hover/click helper
+  var _ckrbBtnAudioCtx = null;
+  function _ckrbBtnTone(freq, dur, vol, type) {
+    try {
+      if (!_ckrbBtnAudioCtx) _ckrbBtnAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (_ckrbBtnAudioCtx.state === 'suspended') _ckrbBtnAudioCtx.resume();
+      var osc = _ckrbBtnAudioCtx.createOscillator();
+      var gain = _ckrbBtnAudioCtx.createGain();
+      osc.connect(gain); gain.connect(_ckrbBtnAudioCtx.destination);
+      osc.type = type || 'sine';
+      osc.frequency.value = freq || 440;
+      gain.gain.setValueAtTime(vol || 0.1, _ckrbBtnAudioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _ckrbBtnAudioCtx.currentTime + (dur || 0.1));
+      osc.start(); osc.stop(_ckrbBtnAudioCtx.currentTime + (dur || 0.1));
+    } catch(e) {}
+  }
+  function _ckrbBtnHoverSound() { _ckrbBtnTone(880, 0.04, 0.06, 'sine'); }
+  function _ckrbBtnClickSound() { _ckrbBtnTone(440, 0.06, 0.15, 'square'); setTimeout(function() { _ckrbBtnTone(330, 0.08, 0.1, 'square'); }, 40); }
+
+  function _ckrb3dBtn(b) {
+    if (!b || b._ckrb3d) return;
+    b._ckrb3d = true;
+    var origTransform = '';
+    var origShadow = '';
+    var origBBW = '';
+    b.addEventListener('mouseenter', function() {
+      origTransform = b.style.transform || '';
+      origShadow = b.style.boxShadow || '';
+      origBBW = b.style.borderBottomWidth || '';
+      b.style.transform = 'translateY(-2px) scale(1.05)';
+      b.style.filter = 'brightness(1.15)';
+      b.style.boxShadow = (origShadow ? origShadow.replace(/\d+px\s+\d+px/, '0 6px') : '0 6px 16px rgba(0,0,0,0.35)');
+      _ckrbBtnHoverSound();
+    });
+    b.addEventListener('mouseleave', function() {
+      b.style.transform = origTransform;
+      b.style.filter = '';
+      b.style.boxShadow = origShadow;
+      b.style.borderBottomWidth = origBBW;
+    });
+    b.addEventListener('mousedown', function() {
+      b.style.transform = 'translateY(2px) scale(0.97)';
+      b.style.filter = 'brightness(0.92)';
+      b.style.borderBottomWidth = '1px';
+      _ckrbBtnClickSound();
+    });
+    b.addEventListener('mouseup', function() {
+      b.style.transform = origTransform;
+      b.style.filter = '';
+      b.style.borderBottomWidth = origBBW;
+    });
+  }
+
 
   /* ── ABORT FLAG ── */
   var _ckrbAbortScrape = false;
@@ -414,8 +467,8 @@
           '</div>' +
           '<div style="padding:14px 20px;overflow-y:auto;flex:1;max-height:300px">' + listHtml + '</div>' +
           '<div style="padding:14px 20px;border-top:1px solid #334155;display:flex;gap:10px">' +
-            '<button id="__ckrb_retry_yes" style="flex:1;padding:10px;background:#f59e0b;color:#0f172a;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Retry Failed Questions</button>' +
-            '<button id="__ckrb_retry_skip" style="flex:1;padding:10px;background:#1e293b;color:#94a3b8;border:1px solid #475569;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Skip &amp; Continue</button>' +
+            '<button id="__ckrb_retry_yes" style="flex:1;padding:10px;background:linear-gradient(180deg,#fbbf24 0%,#f59e0b 100%);color:#0f172a;border:none;border-bottom:3px solid #d97706;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;text-shadow:0 1px 1px rgba(255,255,255,0.2);box-shadow:0 2px 8px rgba(245,158,11,0.4);transition:all 0.15s">Retry Failed Questions</button>' +
+            '<button id="__ckrb_retry_skip" style="flex:1;padding:10px;background:linear-gradient(180deg,#334155 0%,#1e293b 100%);color:#94a3b8;border:1px solid #475569;border-bottom:3px solid #0f172a;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);transition:all 0.15s">Skip &amp; Continue</button>' +
           '</div>' +
         '</div>';
 
@@ -570,7 +623,146 @@
     } catch(_) {}
   }
 
+
+  // v325: CSS for pulsing glow on wrong choice text
+  (function() {
+    var style = document.createElement('style');
+    style.textContent = [
+      '@keyframes ckrb-para-pulse {',
+      '  0%, 100% { background: rgba(249,115,22,0.08); border-left-color: rgba(249,115,22,0.6); }',
+      '  50% { background: rgba(249,115,22,0.18); border-left-color: rgba(249,115,22,1); }',
+      '}',
+      '.ckrb-wrong-para-hl {',
+      '  background: rgba(249,115,22,0.12) !important;',
+      '  border-left: 4px solid #f97316 !important;',
+      '  border-radius: 6px !important;',
+      '  padding: 8px 12px !important;',
+      '  margin: 4px 0 !important;',
+      '  animation: ckrb-para-pulse 2s ease-in-out infinite !important;',
+      '  scroll-margin-top: 120px !important;',
+      '}'
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(style);
+  })();
+
+  // v366: Find wrong choice in explanation — 4 broad patterns + retry logic (matches popup.js)
+  var _ckrbHlRetryIv = null;
+  var _ckrbHlVisIv = null;
+  function _ckrbHighlightWrongChoice(letter) {
+    // Clear any previous retry loops
+    if (_ckrbHlRetryIv) { clearInterval(_ckrbHlRetryIv); _ckrbHlRetryIv = null; }
+    if (_ckrbHlVisIv) { clearInterval(_ckrbHlVisIv); _ckrbHlVisIv = null; }
+    // Remove any previous highlights
+    document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) {
+      el.classList.remove('ckrb-wrong-para-hl');
+    });
+
+    function _doHL(ltr, att) {
+      document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) { el.classList.remove('ckrb-wrong-para-hl'); });
+      // v372: Find explanation section, search only within it
+      var explanationRoot = null;
+      var allEls = document.querySelectorAll('div, section, article, td, p, span, h1, h2, h3, h4, h5, h6, strong, b');
+      for (var ei = 0; ei < allEls.length; ei++) {
+        var elTxt = (allEls[ei].textContent || '').trim().substring(0, 50).toLowerCase();
+        if (elTxt.indexOf('educational objective') === 0 || elTxt.indexOf('explanation') === 0 ||
+            elTxt.indexOf('bottom line') === 0 || elTxt.indexOf('learning objective') === 0) {
+          explanationRoot = allEls[ei].parentElement || allEls[ei];
+          for (var _up = 0; _up < 3 && explanationRoot.parentElement && explanationRoot.parentElement !== document.body; _up++) {
+            if ((explanationRoot.textContent||'').length > 500) break;
+            explanationRoot = explanationRoot.parentElement;
+          }
+          break;
+        }
+      }
+      var searchRoot = explanationRoot || document.body;
+      // v428: Exact match first, grouped match as fallback
+      var patterns = [
+        new RegExp('\\(Choice\\s+' + ltr + '\\)', 'i'),           // "(Choice E)" exact
+        new RegExp('\\(Choice\\s+' + ltr + '\\b', 'i'),           // "(Choice E ..." 
+        new RegExp('\\(Choices\\s+[^)]*\\b' + ltr + '\\b[^)]*\\)', '') // case-sensitive grouped match
+      ];
+      // v430: Search element textContent — exclude sidebar, answer choices, question stem
+      var bestBlock = null, bestScore = -999;
+      var candidates = searchRoot.querySelectorAll('p, div, td, li, span, section');
+      for (var _ci = 0; _ci < candidates.length; _ci++) {
+        var _el = candidates[_ci];
+        if (_el.offsetParent === null) continue;
+        if (_el.closest && _el.closest('[id^="ckrb"]')) continue;
+        // Skip sidebar, answer container, question stem, nav elements
+        if (_el.closest && (_el.closest('.question-status') || _el.closest('[class*="sidebar"]') || _el.closest('[class*="questionStatus"]') || _el.closest('#answerContainer') || _el.closest('[class*="question-number"]'))) continue;
+        // Skip very large containers (whole page divs)
+        if ((_el.textContent || '').length > 2000) continue;
+        var _elText = _el.textContent || '';
+        for (var _pi = 0; _pi < patterns.length; _pi++) {
+          if (patterns[_pi].test(_elText)) {
+            var block = _el;
+            var _dd = window.getComputedStyle(block).display;
+            if (_dd !== 'block' && _dd !== 'list-item' && _dd !== 'table-cell' && _dd !== 'flex') {
+              while (block && block !== document.body) {
+                _dd = window.getComputedStyle(block).display;
+                if (_dd === 'block' || _dd === 'list-item' || _dd === 'table-cell' || _dd === 'flex') break;
+                block = block.parentElement;
+              }
+            }
+            if (block && block !== document.body && block.offsetParent !== null) {
+              var txt = (block.textContent || '').trim();
+              var sc = (2 - _pi) * 3;
+              if (txt.length > 80) sc += 5;
+              else if (txt.length > 30) sc += 1;
+              else sc -= 10;
+              if (/^\s*[A-G][.)\s]/.test(txt) && txt.length < 100) sc -= 20;
+              if (txt.length < 500) sc += 2; // prefer specific paragraphs
+              if (sc > bestScore) { bestScore = sc; bestBlock = block; }
+            }
+            break;
+          }
+        }
+      }
+      if (!bestBlock) return false;
+      bestBlock.classList.add('ckrb-wrong-para-hl');
+      // v431: No auto-scroll — user clicks magnifying button instead
+      console.log('[CK Buddy] Highlight: score=' + bestScore + ' len=' + (bestBlock.textContent||'').length + ' (att ' + att + ')');
+      return true;
+    }
+
+    // Try immediately, then retry every 1.5s for up to 20 attempts
+    window._ckrbHlKill = false;
+    var _applied = _doHL(letter, 1);
+    var _retries = 0;
+    _ckrbHlRetryIv = setInterval(function() {
+      if (window._ckrbHlKill) { clearInterval(_ckrbHlRetryIv); clearInterval(_ckrbHlVisIv); return; }
+      _retries++;
+      var _vis = document.querySelectorAll('.ckrb-wrong-para-hl');
+      if (_vis.length === 0) _applied = false;
+      if (!_applied) _applied = _doHL(letter, _retries + 1);
+      if (_retries >= 60) clearInterval(_ckrbHlRetryIv);
+    }, 3000);
+    // Visibility watcher — clean up highlights in hidden panels
+    _ckrbHlVisIv = setInterval(function() {
+      if (window._ckrbHlKill) { clearInterval(_ckrbHlVisIv); return; }
+      document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) {
+        if (el.offsetParent === null) el.classList.remove('ckrb-wrong-para-hl');
+      });
+    }, 2000);
+  }
+
   chrome.runtime.onMessage.addListener(function(msg, _, sendResponse) {
+    // v366: Clear highlights message from popup
+    if (msg.type === 'CLEAR_WRONG_HIGHLIGHTS') {
+      document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) { el.classList.remove('ckrb-wrong-para-hl'); });
+      window._ckrbHlKill = true;
+      if (_ckrbHlRetryIv) { clearInterval(_ckrbHlRetryIv); _ckrbHlRetryIv = null; }
+      if (_ckrbHlVisIv) { clearInterval(_ckrbHlVisIv); _ckrbHlVisIv = null; }
+      sendResponse({ ok: true });
+      return;
+    }
+    // v325/v366: Highlight wrong choice letter in Q-bank explanation
+    if (msg.type === 'HIGHLIGHT_WRONG_CHOICE' && msg.letter) {
+      console.log('[CK Buddy] HIGHLIGHT_WRONG_CHOICE letter=' + msg.letter + ' frame=' + window.location.href.substring(0, 80));
+      _ckrbHighlightWrongChoice(msg.letter);
+      sendResponse({ ok: true });
+      return;
+    }
     if (msg.type === 'NAV_TO_QUESTION') {
       window._navStop = true;
       setTimeout(function() {
@@ -649,7 +841,7 @@
         if (!SDK) try { SDK = globalThis.SpeechSDK; } catch(_) {}
         if (!SDK) {
           // No SDK — try REST as fallback
-          var voice = 'en-US-JennyNeural';
+    var voice = 'en-US-JennyNeural';
           var ssml = "<speak version='1.0' xml:lang='en-US'><voice name='" + voice + "'><prosody rate='-5%'>" + _ckrbEscapeXml(_ttsText) + "</prosody></voice></speak>";
           fetch('https://' + reg + '.tts.speech.microsoft.com/cognitiveservices/v1', {
             method: 'POST',
@@ -782,6 +974,7 @@
     if (!rects || rects.length === 0) return false;
     var sx = window.pageXOffset || 0;
     var sy = window.pageYOffset || 0;
+    var _batchOvs = []; // v364: track this batch for auto-fade
     for (var i = 0; i < rects.length; i++) {
       var r = rects[i];
       if (r.width < 1 || r.height < 1) continue;
@@ -790,10 +983,30 @@
       // v225: mix-blend-mode:multiply keeps black text fully readable
       ov.style.cssText = 'position:absolute;pointer-events:none;' +
         'background:#fde047;mix-blend-mode:multiply;z-index:2147483640;' +
+        'transition:opacity 1.5s ease;' +
         'left:' + (r.left + sx) + 'px;top:' + (r.top + sy) + 'px;' +
         'width:' + r.width + 'px;height:' + r.height + 'px;';
       document.body.appendChild(ov);
       _ckrbYellowOverlays.push(ov);
+      _batchOvs.push(ov);
+    }
+    // v364: Auto-fade this batch of overlays after 45 seconds
+    if (_batchOvs.length > 0) {
+      setTimeout(function() {
+        for (var fi = 0; fi < _batchOvs.length; fi++) {
+          try { _batchOvs[fi].style.opacity = '0'; } catch(_) {}
+        }
+        // Remove from DOM + array after fade completes
+        setTimeout(function() {
+          for (var ri = 0; ri < _batchOvs.length; ri++) {
+            try {
+              _batchOvs[ri].remove();
+              var idx = _ckrbYellowOverlays.indexOf(_batchOvs[ri]);
+              if (idx >= 0) _ckrbYellowOverlays.splice(idx, 1);
+            } catch(_) {}
+          }
+        }, 1600);
+      }, 45000);
     }
     return true;
   }
@@ -948,9 +1161,12 @@
        • any mouseup that didn't start from a LEFT mousedown on plain text is ignored
          (prevents stale right-drag selections from getting wrapped later). */
   var _ckrbLeftDragActive = false;
+  var _ckrbLeftDownX = 0, _ckrbLeftDownY = 0; // v364: track start pos for min drag distance
   document.addEventListener('mousedown', function(e) {
     if (e.button !== 0) return;
     _ckrbLeftDragActive = true;
+    _ckrbLeftDownX = e.clientX;
+    _ckrbLeftDownY = e.clientY;
   }, true);
 
   document.addEventListener('mouseup', function(e) {
@@ -994,13 +1210,18 @@
     // Don't yellow-highlight answer-choice rows during exam taking
     if (typeof findAnswerRow === 'function' && findAnswerRow(tgt)) return;
 
+    // v364: Require minimum 8px drag distance to prevent accidental highlights from scroll
+    var _ldx = e.clientX - _ckrbLeftDownX, _ldy = e.clientY - _ckrbLeftDownY;
+    if (Math.sqrt(_ldx * _ldx + _ldy * _ldy) < 8) return;
+
     // Defer one tick so the browser has finalized the selection
     setTimeout(function() {
       try {
         var sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
         var txt = (sel.toString() || '').trim();
-        if (!txt || txt.length < 2) return;
+        // v364: Raised min length from 2 to 8 to prevent micro-selection highlights
+        if (!txt || txt.length < 8) return;
         // Don't double-wrap an already-yellow span
         var r0 = sel.getRangeAt(0);
         var anc = r0.commonAncestorContainer;
@@ -1027,7 +1248,101 @@
         _ckrbClearYellowOverlays();
       }
     } catch(_) {}
-  }, 1000);
+    // v422: Auto-detect wrong answers on review pages — recheck every 3s
+    try { _ckrbAutoWrongAnswerUI(); } catch(_) {}
+  }, 3000);
+
+  // v420: Detect incorrectly answered questions and add UI directly from content script
+  function _ckrbAutoWrongAnswerUI() {
+    // Only on qbank review pages
+    if (!_ckrbIsReviewMode()) { console.log('[AUTO_HL] Not review mode, skipping'); return; }
+    console.log('[AUTO_HL] Review mode detected, checking for wrong answer...');
+    // v423: Clear stale highlights from previous question before checking
+    // Check if the question changed by comparing current question text
+    var _curQText = '';
+    try { var _qEl = document.querySelector('#questionPanel, [class*="questionContent"], [class*="stem"]'); if (_qEl) _curQText = _qEl.textContent.substring(0, 50); } catch(_) {}
+    if (window._ckrbLastAutoQText && window._ckrbLastAutoQText !== _curQText) {
+      // Question changed — clear old highlights and button
+      document.querySelectorAll('.ckrb-wrong-para-hl').forEach(function(el) { el.classList.remove('ckrb-wrong-para-hl'); });
+      var _oldBtn = document.getElementById('__ckrb_goto_hl_btn'); if (_oldBtn) _oldBtn.remove();
+    }
+    window._ckrbLastAutoQText = _curQText;
+    // Find wrong answer row
+    var rows = document.querySelectorAll('#answerContainer tr.answer-choice-background');
+    var wrongRow = null;
+    var wrongLetter = '';
+    var letters = ['A','B','C','D','E','F','G','H'];
+    for (var i = 0; i < rows.length; i++) {
+      var hasTimes = !!rows[i].querySelector('.fa-times');
+      var radio = rows[i].querySelector('mat-radio-button');
+      var isSelected = radio && radio.classList.contains('mat-radio-checked');
+      if (hasTimes && isSelected) { wrongRow = rows[i]; wrongLetter = letters[i] || ''; break; }
+    }
+    if (!wrongRow || !wrongLetter) { console.log('[AUTO_HL] No wrong answer row found'); return; }
+    console.log('[AUTO_HL] Wrong answer: Choice ' + wrongLetter + ' (row found)');
+    // v425: Re-apply highlight if missing
+    var _hlExists = !!document.querySelector('.ckrb-wrong-para-hl');
+    console.log('[AUTO_HL] Highlight exists=' + _hlExists + ' Button exists=' + !!document.getElementById('__ckrb_goto_hl_btn'));
+    if (!_hlExists) {
+      console.log('[AUTO_HL] Highlight MISSING — re-applying for Choice ' + wrongLetter);
+      _ckrbHighlightWrongChoice(wrongLetter);
+    }
+    // Add 🔍 button next to wrong answer (only if not already there)
+    var oldBtn = document.getElementById('__ckrb_goto_hl_btn');
+    if (oldBtn) { console.log('[AUTO_HL] Button already exists, done'); return; }
+    console.log('[AUTO_HL] Creating new 🔍 button for Choice ' + wrongLetter);
+    var btn = document.createElement('button');
+    btn.id = '__ckrb_goto_hl_btn';
+    btn.type = 'button';
+    btn.innerHTML = '\uD83D\uDD0D';
+    btn.title = 'Scroll to explanation for Choice ' + wrongLetter;
+    btn.style.cssText = 'display:inline-block;vertical-align:middle;margin-left:8px;' +
+      'font-size:16px;padding:5px 9px;line-height:1;' +
+      'background:linear-gradient(180deg,#fb923c,#f97316);color:#fff;' +
+      'border:2px solid #fdba74;border-bottom:4px solid #9a3412;border-radius:8px;' +
+      'cursor:pointer;box-shadow:0 3px 0 #9a3412,0 4px 10px rgba(249,115,22,0.4);' +
+      'transition:all 0.15s cubic-bezier(0.34,1.56,0.64,1);' +
+      'text-shadow:0 1px 2px rgba(0,0,0,0.3);';
+    btn.addEventListener('mouseenter', function() {
+      btn.style.transform = 'translateY(-2px) scale(1.1)';
+      btn.style.background = 'linear-gradient(180deg,#fdba74,#fb923c)';
+      btn.style.borderColor = '#fed7aa';
+      btn.style.boxShadow = '0 5px 0 #9a3412,0 6px 14px rgba(249,115,22,0.5)';
+    });
+    btn.addEventListener('mouseleave', function() {
+      btn.style.transform = '';
+      btn.style.background = 'linear-gradient(180deg,#fb923c,#f97316)';
+      btn.style.borderColor = '#fdba74';
+      btn.style.boxShadow = '0 3px 0 #9a3412,0 4px 10px rgba(249,115,22,0.4)';
+    });
+    btn.addEventListener('mousedown', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      btn.style.transform = 'translateY(3px) scale(0.97)';
+      btn.style.boxShadow = '0 1px 0 #9a3412,0 2px 4px rgba(249,115,22,0.2)';
+      btn.style.borderBottom = '1px solid #9a3412';
+      btn.style.background = 'linear-gradient(180deg,#f97316,#ea580c)';
+    });
+    btn.addEventListener('mouseup', function(e) {
+      e.stopPropagation();
+      btn.style.transform = 'translateY(-2px) scale(1.1)';
+      btn.style.boxShadow = '0 5px 0 #9a3412,0 6px 14px rgba(249,115,22,0.5)';
+      btn.style.borderBottom = '4px solid #9a3412';
+      btn.style.background = 'linear-gradient(180deg,#fdba74,#fb923c)';
+    });
+    btn.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      try{var c=new(window.AudioContext||window.webkitAudioContext)();var o=c.createOscillator();var g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=880;o.type='sine';g.gain.value=0.06;o.start();o.stop(c.currentTime+0.035);}catch(_){}
+      var hl = document.querySelector('.ckrb-wrong-para-hl');
+      if (hl) { hl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      else { btn.style.background='linear-gradient(180deg,#ef4444,#dc2626)'; setTimeout(function(){btn.style.background='linear-gradient(180deg,#fb923c,#f97316)';},2000); }
+    });
+    _ckrb3dBtn(btn); // v423: Wire up hover/click sounds
+    var tds = wrongRow.querySelectorAll('td');
+    (tds.length ? tds[tds.length - 1] : wrongRow).appendChild(btn);
+    // Also re-apply highlight if missing
+    if (!document.querySelector('.ckrb-wrong-para-hl')) _ckrbHighlightWrongChoice(wrongLetter);
+    console.log('[CK Buddy] Auto-detected wrong answer: Choice ' + wrongLetter + ' — added button + highlight');
+  }
 
   /* ── HIGHLIGHT-TO-SPEECH (all platforms + ccscases) ── */
   // Force-enable text selection (ccscases.com disables it via CSS)
@@ -1144,6 +1459,7 @@
      We do NOT mutate UWorld/AMBOSS/NBME's DOM — we draw a floating overlay
      <div> positioned over each word's bounding rect, and move it on every
      onboundary event. */
+  var _ckrbSentenceBadges = [];      // [{el, range}] for scroll repositioning
   var _ckrbWordRanges = [];         // [{range, text, charOffset}]
   var _ckrbHighlightOverlay = null; // the single moving highlight rectangle
   var _ckrbHighlightRange = null;   // range currently under the active overlay
@@ -1210,13 +1526,22 @@
   // a previous extension version. Sweeps top doc, current doc, and any
   // same-origin iframes. Safe to call repeatedly.
   function _ckrbPurgeAllHighlightMarkers() {
+    // v308: Aggressive purge — collect ALL reachable documents
     var docs = [document];
     try { if (window.top && window.top.document && docs.indexOf(window.top.document) === -1) docs.push(window.top.document); } catch(e) {}
-    // Add same-origin iframe docs
     try {
-      var frames = document.querySelectorAll('iframe');
-      for (var f = 0; f < frames.length; f++) {
-        try { var d2 = frames[f].contentDocument; if (d2 && docs.indexOf(d2) === -1) docs.push(d2); } catch(_) {}
+      var allFrames = document.querySelectorAll('iframe');
+      for (var f = 0; f < allFrames.length; f++) {
+        try { var d2 = allFrames[f].contentDocument; if (d2 && docs.indexOf(d2) === -1) docs.push(d2); } catch(_) {}
+      }
+    } catch(e) {}
+    // Also try top doc's iframes
+    try {
+      if (window.top && window.top.document) {
+        var topFrames = window.top.document.querySelectorAll('iframe');
+        for (var f2 = 0; f2 < topFrames.length; f2++) {
+          try { var d3 = topFrames[f2].contentDocument; if (d3 && docs.indexOf(d3) === -1) docs.push(d3); } catch(_) {}
+        }
       }
     } catch(e) {}
     for (var d = 0; d < docs.length; d++) {
@@ -1225,10 +1550,13 @@
       try {
         var strays = doc.querySelectorAll('[data-ckrb-hl="true"],[data-ckrb-hl-spoken="true"]');
         for (var i = 0; i < strays.length; i++) {
-          try { strays[i].parentNode && strays[i].parentNode.removeChild(strays[i]); } catch(e) {}
+          try { strays[i].parentNode.removeChild(strays[i]); } catch(e) {}
         }
       } catch(e) {}
     }
+    // v308: Also null out the JS reference so _ckrbEnsureOverlay creates fresh
+    _ckrbHighlightOverlay = null;
+    _ckrbHighlightRange = null;
   }
 
   function _ckrbDetachReflowListeners() {
@@ -1255,6 +1583,7 @@
 
   function _ckrbRemoveInPlaceHighlight() {
     if (_ckrbCleanupTimer) { try { clearTimeout(_ckrbCleanupTimer); } catch(e) {} _ckrbCleanupTimer = null; }
+    // v312: Do NOT remove badges here — runs from ALL frames and kills badges from TTS frame
     _ckrbPurgeAllHighlightMarkers();
     _ckrbDetachReflowListeners();
     _ckrbWordRanges = [];
@@ -1266,6 +1595,78 @@
 
   // Re-query each tracked range's current bounding rect and reposition its
   // overlay element. Called on scroll/resize so markers follow the page.
+
+  // v311: Inject superscript sentence number badges as absolutely-positioned overlays
+  // Does NOT mutate the DOM text — uses getBoundingClientRect like the highlight system
+  function _ckrbInjectSentenceNumbers(chunkJobs) {
+    _ckrbRemoveSentenceNumbers(); // clean any prior badges
+    _ckrbSentenceBadges = [];
+    var colors = ['#818cf8','#f472b6','#34d399','#fbbf24','#38bdf8','#fb923c','#a78bfa','#f87171','#2dd4bf','#e879f9'];
+    var topDoc = _ckrbTopDoc();
+    var hostWin = topDoc.defaultView || window;
+    var sx = hostWin.pageXOffset || 0;
+    var sy = hostWin.pageYOffset || 0;
+    var off = _ckrbFrameOffsetToTop();
+    for (var i = 0; i < chunkJobs.length; i++) {
+      var job = chunkJobs[i];
+      if (job.domStart >= _ckrbWordRanges.length) continue;
+      var wr = _ckrbWordRanges[job.domStart];
+      if (!wr || !wr.range) continue;
+      var rect = _ckrbGetRangeRect(wr.range);
+      if (!rect) continue;
+      try {
+        var badge = topDoc.createElement('div');
+        badge.className = 'ckrb-sentence-badge';
+        badge.setAttribute('data-ckrb-snum', String(i + 1));
+        var color = colors[i % colors.length];
+        badge.style.cssText = 'position:absolute;z-index:2147483645;' +
+          'left:' + (rect.left + sx + off.dx - 20) + 'px;' +
+          'top:' + (rect.top + sy + off.dy - 6) + 'px;' +
+          'width:18px;height:18px;border-radius:50%;' +
+          'font-size:10px;font-weight:800;color:#fff;line-height:18px;text-align:center;' +
+          'background:' + color + ';' +
+          'box-shadow:0 2px 6px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;' +
+          'pointer-events:none;user-select:none;' +
+          'border:1.5px solid rgba(255,255,255,0.6);text-shadow:0 1px 1px rgba(0,0,0,0.4);';
+        badge.textContent = String(i + 1);
+        topDoc.body.appendChild(badge);
+        _ckrbSentenceBadges.push({ el: badge, range: wr.range });
+      } catch(e) { console.log('[CK Buddy] badge overlay error for sentence ' + (i+1) + ':', e); }
+    }
+  }
+
+  function _ckrbRemoveSentenceNumbers() {
+    _ckrbSentenceBadges = [];
+    // v311: Badges are now in topDoc as absolute overlays
+    try {
+      var topDoc = _ckrbTopDoc();
+      var badges = topDoc.querySelectorAll('.ckrb-sentence-badge');
+      for (var i = 0; i < badges.length; i++) {
+        try { badges[i].parentNode.removeChild(badges[i]); } catch(e) {}
+      }
+    } catch(e) {}
+    try {
+      // Also clean from current document in case of cross-frame
+      var badges2 = document.querySelectorAll('.ckrb-sentence-badge');
+      for (var j = 0; j < badges2.length; j++) {
+        try { badges2[j].parentNode.removeChild(badges2[j]); } catch(e) {}
+      }
+      // Also check iframes
+      var frames = document.querySelectorAll('iframe');
+      for (var f = 0; f < frames.length; f++) {
+        try {
+          var fd = frames[f].contentDocument;
+          if (fd) {
+            var fb = fd.querySelectorAll('.ckrb-sentence-badge');
+            for (var j = 0; j < fb.length; j++) {
+              try { fb[j].parentNode.removeChild(fb[j]); } catch(e) {}
+            }
+          }
+        } catch(e) {}
+      }
+    } catch(e) {}
+  }
+
   function _ckrbRepositionAllMarkers() {
     try {
       var hostWin = (_ckrbTopDoc().defaultView || window);
@@ -1280,6 +1681,18 @@
             _ckrbHighlightOverlay.style.top = (rect.top + sy + off.dy - 2) + 'px';
             _ckrbHighlightOverlay.style.width = (rect.width + 4) + 'px';
             _ckrbHighlightOverlay.style.height = (rect.height + 4) + 'px';
+          }
+        } catch(e) {}
+      }
+      // v314: Reposition sentence number badges on scroll
+      for (var bi = 0; bi < _ckrbSentenceBadges.length; bi++) {
+        var badge = _ckrbSentenceBadges[bi];
+        if (!badge || !badge.el || !badge.range) continue;
+        try {
+          var br = _ckrbGetRangeRect(badge.range);
+          if (br && (br.width || br.height)) {
+            badge.el.style.left = (br.left + sx + off.dx - 20) + 'px';
+            badge.el.style.top = (br.top + sy + off.dy - 6) + 'px';
           }
         } catch(e) {}
       }
@@ -1767,6 +2180,8 @@
     _ckrbStopFallbackHighlight();
     if (_ckrbCleanupTimer) { try { clearTimeout(_ckrbCleanupTimer); } catch(_) {} _ckrbCleanupTimer = null; }
     _ckrbRemoveInPlaceHighlight();
+    // v308: Delayed second purge to catch any overlays that survived
+    setTimeout(function() { try { _ckrbPurgeAllHighlightMarkers(); } catch(e) {} }, 200);
     _ckrbTTSSpeaking = true;
     var mySeq = ++_ckrbSpeakSeq;
 
@@ -1800,28 +2215,38 @@
     // then each sentence runs from its anchor to the next sentence's anchor.
 
     function _findDomAnchor(searchFrom, sentenceText) {
-      // Extract the first alphanumeric word from the sentence text
+      // v313: Extract first 3 alphanumeric words for multi-word matching
+      // Single-word matching caused false hits on common words like "The", "A", "In"
       var tokens = sentenceText.match(/[^\s\-]+/g) || [];
-      var firstWord = '';
-      for (var t = 0; t < tokens.length; t++) {
+      var matchWords = [];
+      for (var t = 0; t < tokens.length && matchWords.length < 3; t++) {
         if (/[a-zA-Z0-9]/.test(tokens[t])) {
-          firstWord = tokens[t].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-          break;
+          matchWords.push(tokens[t].replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
         }
       }
-      if (!firstWord) return searchFrom;
+      if (!matchWords.length) return searchFrom;
 
-      // Search DOM words near the expected position (within +/- 10 words)
-      var lo = Math.max(0, searchFrom - 3);
-      var hi = Math.min(_ckrbWordRanges.length, searchFrom + 15);
-      for (var i = lo; i < hi; i++) {
-        var domWord = _ckrbWordRanges[i].text.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (domWord === firstWord) return i;
+      function _domWordAt(idx) {
+        if (idx < 0 || idx >= _ckrbWordRanges.length) return '';
+        return _ckrbWordRanges[idx].text.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       }
-      // Broader search if not found nearby
-      for (var i2 = searchFrom; i2 < Math.min(searchFrom + 30, _ckrbWordRanges.length); i2++) {
-        var dw2 = _ckrbWordRanges[i2].text.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (dw2 === firstWord) return i2;
+
+      // Try matching all 3 words first (most precise), then fall back to 2, then 1
+      for (var nMatch = matchWords.length; nMatch >= 1; nMatch--) {
+        for (var i = searchFrom; i < _ckrbWordRanges.length; i++) {
+          if (_domWordAt(i) !== matchWords[0]) continue;
+          // Check subsequent words
+          var allMatch = true;
+          for (var w = 1; w < nMatch; w++) {
+            if (_domWordAt(i + w) !== matchWords[w]) { allMatch = false; break; }
+          }
+          if (allMatch) return i;
+        }
+      }
+      // Also check a few words before searchFrom
+      var lo = Math.max(0, searchFrom - 5);
+      for (var i2 = lo; i2 < searchFrom; i2++) {
+        if (_domWordAt(i2) === matchWords[0]) return i2;
       }
       return searchFrom; // fallback
     }
@@ -1849,6 +2274,9 @@
         (j.domStart < _ckrbWordRanges.length ? _ckrbWordRanges[j.domStart].text : '?') +
         '" text="' + j.text.substring(0, 40) + '…"');
     }
+
+    // v307: Inject superscript sentence numbers into DOM
+    _ckrbInjectSentenceNumbers(chunkJobs);
 
     var voice = 'en-US-JennyNeural';
     var cache = {};
@@ -1952,9 +2380,9 @@
     // v204: nextJob passed so Reposition can scan nearby DOM words
     // v208: okLabel parameter lets pre-play dialog say "Play" instead of "Next Sentence"
     // v216: nextJobIdx so reposition can clear cached audio for re-synthesis
-    function showChunkConfirm(msg, onOk, onCancel, nextJob, okLabel, nextJobIdx, onBack, onReplay) {
+    function showChunkConfirm(msg, onOk, onCancel, nextJob, okLabel, nextJobIdx, onBack, onReplay, _sentenceJump) {
       var btnLabel = okLabel || '▶ Next';
-      var btnStyle = 'border:none;padding:9px 16px;border-radius:8px;font-size:13px;cursor:pointer;font-weight:600;margin:0 3px;';
+      var btnStyle = 'border:none;border-bottom:3px solid rgba(0,0,0,0.3);padding:9px 16px;border-radius:10px;font-size:13px;cursor:pointer;font-weight:600;margin:0 3px;transition:all 0.15s;text-shadow:0 1px 1px rgba(0,0,0,0.2);box-shadow:0 2px 6px rgba(0,0,0,0.3);';
       var overlay = document.createElement('div');
       overlay.id = 'ckrb-chunk-confirm';
       overlay.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
@@ -1964,15 +2392,57 @@
         'max-width:480px;font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;' +
         'box-shadow:0 20px 60px rgba(0,0,0,0.5);text-align:center;pointer-events:auto;cursor:grab;' +
         'border:2px solid #6366f1;user-select:none;';
+      // v307: Sentence picker — numbered circles for jumping to any sentence
+      var sentPicker = '';
+      if (chunkJobs && chunkJobs.length > 1) {
+        var colors = ['#818cf8','#f472b6','#34d399','#fbbf24','#38bdf8','#fb923c','#a78bfa','#f87171','#2dd4bf','#e879f9'];
+        var currentIdx = (typeof nextJobIdx === 'number') ? nextJobIdx : -1;
+        sentPicker = '<div style="display:flex;justify-content:center;flex-wrap:wrap;gap:5px;margin-top:10px;margin-bottom:6px;">';
+        for (var si = 0; si < chunkJobs.length; si++) {
+          var sc = colors[si % colors.length];
+          var isActive = (si === currentIdx);
+          var isDone = (si < currentIdx);
+          var opacity = isDone ? '0.5' : '1';
+          var ring = isActive ? 'box-shadow:0 0 0 3px #fff,0 0 12px ' + sc + ';' : '';
+          var check = isDone ? '✓' : String(si + 1);
+          sentPicker += '<button class="ckrb-sent-jump" data-sidx="' + si + '" style="' +
+            'width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.6);' +
+            'background:' + sc + ';color:#fff;font-size:11px;font-weight:800;cursor:pointer;' +
+            'display:flex;align-items:center;justify-content:center;padding:0;' +
+            'opacity:' + opacity + ';transition:all 0.15s;' + ring +
+            'text-shadow:0 1px 1px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;' +
+            '">' + check + '</button>';
+        }
+        sentPicker += '</div>';
+      }
+
       var btns = '<div style="display:flex;justify-content:center;flex-wrap:wrap;gap:4px;margin-top:14px;">';
       if (onBack) btns += '<button id="ckrb-confirm-back" style="' + btnStyle + 'background:#6366f1;color:white;">◀ Back</button>';
       if (onReplay) btns += '<button id="ckrb-confirm-replay" style="' + btnStyle + 'background:#8b5cf6;color:white;">↻ Replay</button>';
       btns += '<button id="ckrb-confirm-ok" style="' + btnStyle + 'background:#3b82f6;color:white;">' + btnLabel + '</button>';
       btns += '<button id="ckrb-confirm-cancel" style="' + btnStyle + 'background:#ef4444;color:white;">■ Stop</button>';
       btns += '</div>';
-      box.innerHTML = '<div style="margin-bottom:4px;color:#94a3b8;font-size:12px;">' + msg + '</div>' + btns;
+      box.innerHTML = '<div style="margin-bottom:4px;color:#94a3b8;font-size:12px;">' + msg + '</div>' + sentPicker + btns;
       overlay.appendChild(box);
       document.body.appendChild(overlay);
+
+      // v305: 3D hover/click on confirm dialog buttons
+      box.querySelectorAll('button').forEach(_ckrb3dBtn);
+
+      // v307: Wire sentence jump buttons
+      if (_sentenceJump) {
+        var jumpBtns = box.querySelectorAll('.ckrb-sent-jump');
+        jumpBtns.forEach(function(jb) {
+          jb.addEventListener('click', function(e) {
+            e.preventDefault(); e.stopPropagation();
+            var targetIdx = parseInt(jb.getAttribute('data-sidx'), 10);
+            if (!isNaN(targetIdx)) {
+              overlay.remove();
+              _sentenceJump(targetIdx);
+            }
+          });
+        });
+      }
 
       // ── Drag-to-move ──
       var _dragOx = 0, _dragOy = 0, _dragging = false;
@@ -2110,6 +2580,7 @@
       var nextIdx = finishedIdx + 1;
       if (nextIdx >= chunkJobs.length) {
         // All done
+        _ckrbRemoveSentenceNumbers();
         _ckrbTTSSpeaking = false;
         if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = '🔊 Read';
         _ckrbCleanupTimer = setTimeout(function() { _ckrbCleanupTimer = null; _ckrbRemoveInPlaceHighlight(); }, 900);
@@ -2135,6 +2606,7 @@
         },
         function() { // Stop
           console.log('[CK Buddy TTS] User stopped at chunk ' + nextIdx);
+          _ckrbRemoveSentenceNumbers();
           _ckrbTTSSpeaking = false;
           if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = '🔊 Read';
           _ckrbCleanupTimer = setTimeout(function() { _ckrbCleanupTimer = null; _ckrbRemoveInPlaceHighlight(); }, 900);
@@ -2149,6 +2621,10 @@
         function() { // Replay
           if (mySeq !== _ckrbSpeakSeq) return;
           doChunk(finishedIdx);
+        },
+        function(targetIdx) { // v307: Sentence jump
+          if (mySeq !== _ckrbSpeakSeq) return;
+          doChunk(targetIdx);
         }
       );
     }
@@ -2158,6 +2634,7 @@
       console.log('[CK Buddy TTS DEBUG] doChunk(' + idx + ') called, azureDown=' + _ckrbAzureDown);
       if (mySeq !== _ckrbSpeakSeq) return;
       if (idx >= chunkJobs.length) {
+        _ckrbRemoveSentenceNumbers();
         _ckrbTTSSpeaking = false;
         if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = '🔊 Read';
         _ckrbCleanupTimer = setTimeout(function() { _ckrbCleanupTimer = null; _ckrbRemoveInPlaceHighlight(); }, 900);
@@ -2170,7 +2647,8 @@
 
       var job = chunkJobs[idx];
       var numWords = job.domEnd - job.domStart;
-      if (numWords <= 0) { pauseAndConfirm(idx); return; }
+      // v312: Still play audio even with 0 DOM words (just no highlighting)
+      // Old behavior skipped audio entirely, causing silent checkmarks
 
       // v207: Force-reset highlight index so the first word highlight always works.
       // Without this, a stale _ckrbHighlightIdx from hover preview or prior chunk
@@ -2377,13 +2855,20 @@
         },
         function() { // Stop
           console.log('[CK Buddy TTS] User cancelled before first chunk');
+          _ckrbRemoveSentenceNumbers();
           _ckrbTTSSpeaking = false;
-          if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = '🔊 Read';
+          if (_ckrbTTSBtn) _ckrbTTSBtn.innerHTML = 'ð Read';
           _ckrbCleanupTimer = setTimeout(function() { _ckrbCleanupTimer = null; _ckrbRemoveInPlaceHighlight(); }, 900);
         },
         firstJob, // pass so Reposition can adjust domStart
         '▶ Play', // v208: custom label for pre-play dialog
-        0          // v216: chunk index for cache invalidation
+        0,         // v216: chunk index for cache invalidation
+        null,      // no Back on pre-play
+        null,      // no Replay on pre-play
+        function(targetIdx) { // v307: Sentence jump from pre-play
+          if (mySeq !== _ckrbSpeakSeq) return;
+          doChunk(targetIdx);
+        }
       );
     } else {
       doChunk(0);
@@ -2554,11 +3039,62 @@
     btn.type = 'button';
     btn.innerHTML = '🔊 Read';
     btn.setAttribute('data-ckrb-tts', 'true');
+    // v375: Add close ✕ button
+    var closeX = hostDoc.createElement('button');
+    closeX.type = 'button';
+    closeX.textContent = '✕';
+    closeX.style.cssText = 'margin-left:8px;font-size:12px;font-weight:800;cursor:pointer;' +
+      'background:linear-gradient(180deg,#ef4444 0%,#dc2626 100%);color:#fff;' +
+      'border:2px solid #fca5a5;border-bottom:3px solid #991b1b;border-radius:8px;' +
+      'padding:2px 8px;text-shadow:0 1px 1px rgba(0,0,0,0.3);' +
+      'box-shadow:0 2px 6px rgba(239,68,68,0.4);' +
+      'transition:all 0.15s cubic-bezier(0.34,1.56,0.64,1);';
+    closeX.addEventListener('mouseenter', function() {
+      closeX.style.transform = 'translateY(-2px) scale(1.1)';
+      closeX.style.boxShadow = '0 4px 10px rgba(239,68,68,0.5)';
+      closeX.style.background = 'linear-gradient(180deg,#f87171 0%,#ef4444 100%)';
+      closeX.style.borderColor = '#fecaca';
+    });
+    closeX.addEventListener('mouseleave', function() {
+      closeX.style.transform = '';
+      closeX.style.boxShadow = '0 2px 6px rgba(239,68,68,0.4)';
+      closeX.style.background = 'linear-gradient(180deg,#ef4444 0%,#dc2626 100%)';
+      closeX.style.borderColor = '#fca5a5';
+    });
+    closeX.addEventListener('mousedown', function() {
+      closeX.style.transform = 'translateY(2px) scale(0.95)';
+      closeX.style.boxShadow = '0 1px 2px rgba(239,68,68,0.3)';
+      closeX.style.borderBottom = '1px solid #991b1b';
+    });
+    closeX.addEventListener('mouseup', function() {
+      closeX.style.transform = 'translateY(-2px) scale(1.1)';
+      closeX.style.borderBottom = '3px solid #991b1b';
+    });
+    closeX.addEventListener('mousedown', function(e) { e.preventDefault(); e.stopPropagation(); });
+    closeX.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      // Stop TTS if speaking
+      if (_ckrbTTSSpeaking) {
+        try { (hostWin.speechSynthesis || window.speechSynthesis).cancel(); } catch(_) {}
+        _ckrbTTSSpeaking = false;
+        _ckrbRemoveSentenceNumbers();
+        _ckrbRemoveInPlaceHighlight();
+        setTimeout(function() { try { _ckrbPurgeAllHighlightMarkers(); } catch(_) {} }, 300);
+      }
+      // v376: Delay removal so button absorbs mouseup/pointerup — prevents click-through to flipbook
+      setTimeout(function() { _ckrbRemoveTTSBtn(); }, 100);
+    });
+    closeX.addEventListener('mouseup', function(e) { e.stopPropagation(); e.stopImmediatePropagation(); });
+    closeX.addEventListener('pointerup', function(e) { e.stopPropagation(); e.stopImmediatePropagation(); });
+    _ckrb3dBtn(closeX); // v382: Wire up hover/click sounds
+    btn.appendChild(closeX);
     var maxX = (hostWin.innerWidth || 1200) - 90;
     var maxY = (hostWin.innerHeight || 800) - 40;
     var px = Math.max(8, Math.min(maxX, x|0));
     var py = Math.max(8, Math.min(maxY, y|0));
-    btn.style.cssText = 'position:fixed;left:' + px + 'px;top:' + py + 'px;z-index:2147483647;background:#6366f1;color:#fff;border:2px solid #818cf8;border-radius:8px;padding:6px 12px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;';
+    btn.style.cssText = 'position:fixed;left:' + px + 'px;top:' + py + 'px;z-index:2147483647;background:linear-gradient(180deg,#818cf8 0%,#6366f1 100%);color:#fff;border:2px solid #a5b4fc;border-bottom:4px solid #4338ca;border-radius:10px;padding:6px 14px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(99,102,241,0.5);user-select:none;text-shadow:0 1px 2px rgba(0,0,0,0.3);transition:all 0.15s cubic-bezier(0.34,1.56,0.64,1);';
     // Capture the range snapshot so we can walk the exact DOM nodes later
     var capturedRange = null;
     if (range && typeof range.cloneRange === 'function') {
@@ -2572,12 +3108,16 @@
         try { (hostWin.speechSynthesis || window.speechSynthesis).cancel(); } catch(err) {}
         _ckrbTTSSpeaking = false;
         btn.innerHTML = '🔊 Read';
+        _ckrbRemoveSentenceNumbers();
         _ckrbRemoveInPlaceHighlight();
+        // v308: Aggressive delayed purge to catch any stragglers
+        setTimeout(function() { try { _ckrbPurgeAllHighlightMarkers(); } catch(e) {} }, 300);
       } else {
         btn.innerHTML = '⏸ Stop';
         _ckrbSpeak(text, capturedRange);
       }
     });
+    _ckrb3dBtn(btn);
     (hostDoc.body || hostDoc.documentElement).appendChild(btn);
     _ckrbTTSBtn = btn;
   }
@@ -2727,6 +3267,23 @@
   // Run once more after a tick in case markers are re-attached by late code
   try { setTimeout(function() { try { _ckrbPurgeAllHighlightMarkers(); } catch(e) {} }, 500); } catch(e) {}
 
+  // v308: Periodic stale overlay cleanup — if TTS is not active, purge any orphaned highlight overlays
+  setInterval(function() {
+    if (_ckrbTTSSpeaking) return; // don't interfere while speaking
+    try {
+      var topDoc = _ckrbTopDoc();
+      var strays = topDoc.querySelectorAll('[data-ckrb-hl="true"]');
+      if (strays.length > 0) {
+        console.log('[CK Buddy] Cleaning ' + strays.length + ' stale highlight overlay(s)');
+        for (var i = 0; i < strays.length; i++) {
+          try { strays[i].parentNode.removeChild(strays[i]); } catch(e) {}
+        }
+        _ckrbHighlightOverlay = null;
+        _ckrbHighlightRange = null;
+      }
+    } catch(e) {}
+  }, 3000);
+
   // -------- Find the explanation container on the current page -----------
   // Returns the element (not a range) so the caller can decide how to use it.
   function _ckrbFindExplanationElement() {
@@ -2837,7 +3394,14 @@
     {id:'d11', text:'Breathe deeply during the exam'},
     {id:'d12', text:'If there is a weird answer choice and you can’t justify it don’t choose it'},
     {id:'d13', text:'You are not supposed to read long things'},
-    {id:'d14', text:'Find out what is going on — Quick scan → then decide what to read'}
+    {id:'d14', text:'Find out what is going on — Quick scan → then decide what to read'},
+    {id:'d15', text:'If you hate all answer choices, re-read question sentence (then unhighlighted text)'},
+    {id:'d16', text:'Extraneous thoughts should be actively avoided (clear mind and find interest in exam)'},
+    {id:'d17', text:'MARK Questions and come back to them, do not linger/dwell, just mark and think about it later on. If you have time it makes you feel better about skipping & more likely to skip.'},
+    {id:'d18', text:'Drink water / check before block list / bathroom!'},
+    {id:'d19', text:'Go to the bathroom!'},
+    {id:'d20', text:'Avoid perfection — it is the enemy of good enough for time'},
+    {id:'d21', text:'Greet the exam with a breath of fire'}
   ];
 
   function _ckrbLoadCards(cb) {
@@ -2883,6 +3447,29 @@
   function _ckrbSaveCards(cards) {
     try { var o = {}; o[_CKRB_STRAT_KEY] = cards; chrome.storage.local.set(o); } catch(e) {}
   }
+
+  // v353: One-time append of new cards to existing stored set
+  var _CKRB_V353_KEY = 'ckrb_cards_v353_done';
+  try {
+    chrome.storage.local.get([_CKRB_STRAT_KEY, _CKRB_V353_KEY], function(r) {
+      if (r[_CKRB_V353_KEY]) return;
+      var cards = r[_CKRB_STRAT_KEY] || [];
+      var newCards = [
+        {id:'d15', text:'If you hate all answer choices, re-read question sentence (then unhighlighted text)', imageDataUrl:null},
+        {id:'d16', text:'Extraneous thoughts should be actively avoided (clear mind and find interest in exam)', imageDataUrl:null},
+        {id:'d17', text:'MARK Questions and come back to them, do not linger/dwell, just mark and think about it later on. If you have time it makes you feel better about skipping & more likely to skip.', imageDataUrl:null},
+        {id:'d18', text:'Drink water / check before block list / bathroom!', imageDataUrl:null},
+        {id:'d19', text:'Go to the bathroom!', imageDataUrl:null},
+        {id:'d20', text:'Avoid perfection \u2014 it is the enemy of good enough for time', imageDataUrl:null},
+        {id:'d21', text:'Greet the exam with a breath of fire', imageDataUrl:null}
+      ];
+      newCards.forEach(function(nc) { cards.push(nc); });
+      _ckrbSaveCards(cards);
+      var mo = {}; mo[_CKRB_V353_KEY] = true;
+      chrome.storage.local.set(mo);
+      console.log('[CK Buddy] Appended 7 new strategy cards to existing ' + (cards.length - 7) + ' cards');
+    });
+  } catch(e) {}
 
   function _ckrbToggleFlipbook() {
     var existing = document.getElementById('__ckrb_flipbook');
@@ -2981,6 +3568,7 @@
     closeBtn.textContent = '✕';
     closeBtn.style.cssText = 'background:linear-gradient(180deg,#64748b 0%,#475569 100%);border:none;border-bottom:3px solid #334155;border-radius:8px;color:#fff;font-size:14px;cursor:pointer;padding:4px 10px;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,0.3);outline:none;';
     closeBtn.addEventListener('click', function() { _fbStopSpeak(); root.remove(); });
+    _ckrb3dBtn(closeBtn);
     header.appendChild(closeBtn);
     root.appendChild(header);
 
@@ -3002,6 +3590,7 @@
     var prevBtn = hostDoc.createElement('button'); prevBtn.type='button'; prevBtn.textContent='◀'; prevBtn.style.cssText=btnS;
     var counter = hostDoc.createElement('span'); counter.style.cssText='color:#94a3b8;font-size:15px;font-weight:600;min-width:70px;text-align:center;letter-spacing:1px;';
     var nextBtn = hostDoc.createElement('button'); nextBtn.type='button'; nextBtn.textContent='▶'; nextBtn.style.cssText=btnS;
+    _ckrb3dBtn(prevBtn); _ckrb3dBtn(nextBtn);
     nav.appendChild(prevBtn); nav.appendChild(counter); nav.appendChild(nextBtn);
     root.appendChild(nav);
 
@@ -3014,6 +3603,7 @@
     var delBtn = hostDoc.createElement('button'); delBtn.type='button'; delBtn.textContent='🗑 Delete'; delBtn.style.cssText=actS+'background:linear-gradient(180deg,#f87171 0%,#ef4444 100%);color:#fff;border-bottom-color:#b91c1c;';
     var editBtn = hostDoc.createElement('button'); editBtn.type='button'; editBtn.textContent='✏️ Edit'; editBtn.style.cssText=actS+'background:linear-gradient(180deg,#fbbf24 0%,#f59e0b 100%);color:#fff;border-bottom-color:#d97706;';
     var ttsBtn = hostDoc.createElement('button'); ttsBtn.type='button'; ttsBtn.textContent='🔊 Repeat'; ttsBtn.style.cssText=actS+'background:linear-gradient(180deg,#38bdf8 0%,#0ea5e9 100%);color:#fff;border-bottom-color:#0369a1;';
+    [ttsBtn, addBtn, editBtn, imgBtn, delBtn].forEach(_ckrb3dBtn);
     actions.appendChild(ttsBtn); actions.appendChild(addBtn); actions.appendChild(editBtn); actions.appendChild(imgBtn); actions.appendChild(delBtn);
     root.appendChild(actions);
 
@@ -3171,6 +3761,7 @@
       okBtn.style.cssText = 'background:linear-gradient(180deg,#4ade80 0%,#22c55e 100%);color:#fff;border:none;border-bottom:3px solid #15803d;border-radius:10px;padding:10px 24px;cursor:pointer;font-weight:700;font-size:13px;outline:none;text-shadow:0 1px 1px rgba(0,0,0,0.2);';
       var cancelBtn = hostDoc.createElement('button'); cancelBtn.type='button'; cancelBtn.textContent='Cancel';
       cancelBtn.style.cssText = 'background:linear-gradient(180deg,#94a3b8 0%,#64748b 100%);color:#fff;border:none;border-bottom:3px solid #475569;border-radius:10px;padding:10px 24px;cursor:pointer;font-weight:700;font-size:13px;outline:none;text-shadow:0 1px 1px rgba(0,0,0,0.2);';
+      _ckrb3dBtn(okBtn); _ckrb3dBtn(cancelBtn);
       btnRow.appendChild(okBtn); btnRow.appendChild(cancelBtn);
       formWrap.appendChild(formTitle); formWrap.appendChild(inp); formWrap.appendChild(btnRow);
       cardArea.appendChild(formWrap);
@@ -3214,6 +3805,7 @@
       okBtn.style.cssText = 'background:linear-gradient(180deg,#4ade80 0%,#22c55e 100%);color:#fff;border:none;border-bottom:3px solid #15803d;border-radius:10px;padding:10px 24px;cursor:pointer;font-weight:700;font-size:13px;outline:none;text-shadow:0 1px 1px rgba(0,0,0,0.2);';
       var cancelBtn = hostDoc.createElement('button'); cancelBtn.type='button'; cancelBtn.textContent='Cancel';
       cancelBtn.style.cssText = 'background:linear-gradient(180deg,#94a3b8 0%,#64748b 100%);color:#fff;border:none;border-bottom:3px solid #475569;border-radius:10px;padding:10px 24px;cursor:pointer;font-weight:700;font-size:13px;outline:none;text-shadow:0 1px 1px rgba(0,0,0,0.2);';
+      _ckrb3dBtn(okBtn); _ckrb3dBtn(cancelBtn);
       btnRow.appendChild(okBtn); btnRow.appendChild(cancelBtn);
       formWrap.appendChild(formTitle); formWrap.appendChild(inp); formWrap.appendChild(btnRow);
       cardArea.appendChild(formWrap);
@@ -3379,12 +3971,17 @@
     btn.innerHTML = '🃏';
     btn.title = 'Strategy Cards';
     btn.setAttribute('data-ckrb-tts', 'true');
-    btn.style.cssText = 'position:fixed;bottom:70px;right:20px;z-index:2147483647;width:42px;height:42px;' +
-      'border-radius:50%;background:#6366f1;color:#fff;border:2px solid #818cf8;font-size:20px;cursor:pointer;' +
-      'box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;';
+    btn.style.cssText = 'position:fixed;bottom:70px;right:20px;z-index:2147483647;width:48px;height:48px;' +
+      'border-radius:50%;background:linear-gradient(180deg,#818cf8 0%,#6366f1 100%);color:#fff;border:2px solid #a5b4fc;border-bottom:4px solid #4338ca;font-size:22px;cursor:pointer;' +
+      'box-shadow:0 4px 12px rgba(99,102,241,0.5);display:flex;align-items:center;justify-content:center;transition:all 0.15s cubic-bezier(0.34,1.56,0.64,1);';
+    btn.addEventListener('mouseenter', function() { btn.style.transform='translateY(-2px) scale(1.1)'; btn.style.boxShadow='0 6px 18px rgba(99,102,241,0.6)'; });
+    btn.addEventListener('mouseleave', function() { btn.style.transform=''; btn.style.boxShadow='0 4px 12px rgba(99,102,241,0.5)'; });
+    btn.addEventListener('mousedown', function() { btn.style.transform='translateY(2px) scale(0.95)'; btn.style.borderBottomWidth='1px'; });
+    btn.addEventListener('mouseup', function() { btn.style.transform=''; btn.style.borderBottomWidth='4px'; });
     btn.addEventListener('click', function() {
       try { _ckrbToggleFlipbook(); } catch(e) { console.error('[CK Buddy] Flipbook toggle error:', e); }
     });
+    _ckrb3dBtn(btn);
     document.body.appendChild(btn);
     console.log('[CK Buddy] Flipbook toggle button created on', host, 'frame:', window === window.top ? 'TOP' : 'CHILD');
   }
@@ -3405,12 +4002,17 @@
     btn.innerHTML = '📋';
     btn.title = 'Review Strategies';
     btn.setAttribute('data-ckrb-tts', 'true');
-    btn.style.cssText = 'position:fixed;bottom:120px;right:20px;z-index:2147483647;width:42px;height:42px;' +
-      'border-radius:50%;background:#10b981;color:#fff;border:2px solid #34d399;font-size:20px;cursor:pointer;' +
-      'box-shadow:0 2px 8px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;';
+    btn.style.cssText = 'position:fixed;bottom:126px;right:20px;z-index:2147483647;width:48px;height:48px;' +
+      'border-radius:50%;background:linear-gradient(180deg,#34d399 0%,#10b981 100%);color:#fff;border:2px solid #6ee7b7;border-bottom:4px solid #059669;font-size:22px;cursor:pointer;' +
+      'box-shadow:0 4px 12px rgba(16,185,129,0.5);display:flex;align-items:center;justify-content:center;transition:all 0.15s cubic-bezier(0.34,1.56,0.64,1);';
+    btn.addEventListener('mouseenter', function() { btn.style.transform='translateY(-2px) scale(1.1)'; btn.style.boxShadow='0 6px 18px rgba(16,185,129,0.6)'; });
+    btn.addEventListener('mouseleave', function() { btn.style.transform=''; btn.style.boxShadow='0 4px 12px rgba(16,185,129,0.5)'; });
+    btn.addEventListener('mousedown', function() { btn.style.transform='translateY(2px) scale(0.95)'; btn.style.borderBottomWidth='1px'; });
+    btn.addEventListener('mouseup', function() { btn.style.transform=''; btn.style.borderBottomWidth='4px'; });
     btn.addEventListener('click', function() {
       try { _ckrbToggleReviewFlipbook(); } catch(e) { console.error('[CK Buddy] Review toggle error:', e); }
     });
+    _ckrb3dBtn(btn);
     document.body.appendChild(btn);
     console.log('[CK Buddy] Review toggle button created on', host);
   }
