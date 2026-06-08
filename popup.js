@@ -1,7 +1,7 @@
 // popup.js — CK Review Buddy Game Logic
 
 // VERSION: must match content.js AND manifest.json -- run `node bump.js` to update all 3
-const CKRB_VERSION = '432';
+const CKRB_VERSION = '433';
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // !! CLAUDE: YOU MUST RUN `node bump.js` AFTER EVERY EDIT    !!
 // !! THEN `node verify-versions.js` TO CONFIRM               !!
@@ -1775,12 +1775,7 @@ function showFeedback(isCorrect, explanation, points, trivia) {
   if (quizState.currentIndex + 1 >= quizState.triviaQueue.length) {
     var nextBtn2 = document.getElementById('btnNextQ');
     if (nextBtn2) nextBtn2.textContent = 'See Results →';
-    // Auto-advance after 3 seconds
-    setTimeout(function() {
-      quizState.currentIndex++;
-      saveQuizProgress();
-      showResults();
-    }, 3000);
+    // v432: No auto-advance — user clicks See Results when ready
   }
   startTimer();
 }

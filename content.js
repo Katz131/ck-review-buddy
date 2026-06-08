@@ -2,7 +2,7 @@
 
 (function () {
   // VERSION: must match popup.js AND manifest.json -- run `node bump.js` to update all 3
-  var CKRB_VERSION = '432';
+  var CKRB_VERSION = '433';
   try { console.log('[CK Buddy v' + CKRB_VERSION + '] content.js loaded on', location.hostname); } catch(_) {}
   // v306: Audio + 3D button hover/click helper
   var _ckrbBtnAudioCtx = null;
@@ -4026,7 +4026,7 @@
     try { if (window.parent && window.parent !== window && window.parent.document) return; } catch(e) {}
     var href = '';
     try { href = location.href; } catch(e) {}
-    if (/\/createtest|\/customsession/i.test(href)) {
+    if (/\/createtest|\/customsession|\/blocks/i.test(href)) {
       _ckrbFlipbookAutoShown = true;
       _ckrbShowFlipbook();
     }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "🧠 DRK Buddy v432 (update)",
-  "version": "4.1320",
+  "name": "🧠 DRK Buddy v433 (update)",
+  "version": "4.1330",
   "description": "Scrapes NBME, AMBOSS, UWorld & CCS Cases Q-banks, analyzes wrong answers, quizzes you on missed concepts.",
   "permissions": [
     "activeTab",
